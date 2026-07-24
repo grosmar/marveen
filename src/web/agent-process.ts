@@ -544,6 +544,11 @@ export function ensureSharedClaudeOnboarded(dotClaudePath: string = join(homedir
   }
 }
 
+// (The local async-offload draft's `execFileAsync`, its seconds-based `delay`
+// and the `sendQueue` FIFO were dropped in the v1.23.0 merge: upstream's own
+// async sendPromptToSession supersedes them and uses the ms-based `delay`
+// defined at the top of this file.)
+
 function resolveAgentProvider(name: string): ChannelProviderType {
   const perAgent = readAgentChannelProvider(name)
   if (perAgent === 'slack' || perAgent === 'telegram' || perAgent === 'discord' || perAgent === 'googlechat' || perAgent === 'teams') return perAgent
@@ -1059,7 +1064,15 @@ export function startAgentProcess(name: string, opts: { fresh?: boolean } = {}):
     const promptSuggestionEnv = 'export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false && '
     // Single-quote `${model}` so values like `claude-opus-4-8[1m]` (1M-context
     // suffix) are not glob-expanded by the shell that tmux spawns the command in.
-    const cmd = `export PATH="/opt/homebrew/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin:$PATH" && ${unsetTokens} && ${promptSuggestionEnv}${mcpEnv}${channelSetup}${apiKeyEnv}${claudeConfigEnv}${oauthTokenEnv}${ollamaEnv}${deepseekEnv}${openrouterEnv}cd "${dir}" && ${claudeBin()} ${continueFlag}${skipFlag}--model '${model}' ${channelFlag}`.trimEnd()
+    // `--add-dir <repo>/shared-skills` loads the fleet-wide SHARED skills from that
+    // folder's .claude/skills/ (zubi #1607: skills live per-agent in the repo, not in
+    // ~/.claude/skills; the CLI --add-dir flag is the only mechanism that actually loads
+    // skills from an extra dir — settings/SDK additionalDirectories do NOT, see issues
+    // anthropics/claude-code#30064 / #37553). Per-agent private skills load from each
+    // agent's own cwd .claude/skills/ automatically. LOCAL-ONLY: upstream has no
+    // shared-skills mechanism, so this flag must be re-grafted after every merge.
+    const sharedSkillsDir = '/home/zubi/marveen/shared-skills'
+    const cmd = `export PATH="/opt/homebrew/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin:$PATH" && ${unsetTokens} && ${promptSuggestionEnv}${mcpEnv}${channelSetup}${apiKeyEnv}${claudeConfigEnv}${oauthTokenEnv}${ollamaEnv}${deepseekEnv}${openrouterEnv}cd "${dir}" && ${claudeBin()} ${continueFlag}${skipFlag}--add-dir "${sharedSkillsDir}" --model '${model}' ${channelFlag}`.trimEnd()
     runTmux(null, ['new-session', '-d', '-s', session, cmd], { timeout: 10000 })
 
     logger.info({ name, session, channelDir: agentChannelDir }, 'Agent tmux session started')
@@ -1379,7 +1392,41 @@ async function discardPlaceholderBuffer(session: string, host: string | null = n
 // still reports stuck, send up to SUBMIT_RETRY_MAX_ATTEMPTS extra
 // Enters. The retry budget bounds the loop so a pathologically stuck
 // pane gives up rather than spinning.
+// LOCAL (no upstream equivalent, card 2fc52137 "same-session serialization
+// proof"): one-send-at-a-time PER SESSION. The body is async, so two
+// concurrent sends aimed at the SAME pane would interleave their send-keys
+// chunks and corrupt both prompts. This FIFO chain (keyed by session) restores
+// the serialization the old fully-synchronous body provided implicitly.
+//
+// Deliberately per-session, not the local draft's single global queue: every
+// send now carries an up-to-12s pre-flight wait-until-idle, and one global
+// chain would make a single busy pane head-of-line block delivery to the whole
+// fleet. Sends to DIFFERENT sessions cannot interleave in the same pane, so
+// per-session is the exact scope the hazard needs.
+//
+// The chain is kept alive past a failed send (the queue advances on a
+// swallowed copy) so one rejection cannot wedge every later send to that pane.
+const sendQueues = new Map<string, Promise<unknown>>()
+
 export async function sendPromptToSession(
+  session: string,
+  text: string,
+  host: string | null = null,
+  opts: { waitForIdle?: boolean; onBusyTimeout?: 'send' | 'abort'; idleTimeoutMs?: number } = {},
+): Promise<'sent' | 'aborted-busy'> {
+  const prior = sendQueues.get(session) ?? Promise.resolve()
+  const run = prior.then(() => doSendPromptToSession(session, text, host, opts))
+  // Advance the chain on a swallowed copy, and drop the entry once this send is
+  // the last one queued so the map cannot grow without bound over a long uptime.
+  const settled = run.then(() => {}, () => {})
+  sendQueues.set(session, settled)
+  void settled.then(() => {
+    if (sendQueues.get(session) === settled) sendQueues.delete(session)
+  })
+  return run
+}
+
+async function doSendPromptToSession(
   session: string,
   text: string,
   host: string | null = null,

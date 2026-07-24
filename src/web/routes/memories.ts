@@ -35,7 +35,17 @@ export async function tryHandleMemories(ctx: RouteContext): Promise<boolean> {
 
   if (path === '/api/memories' && method === 'POST') {
     const body = await readBody(req)
-    const data = JSON.parse(body.toString()) as { agent_id?: string; content: string; tier?: string; category?: string; keywords?: string }
+    // Malformed JSON must be a clear 400, not an opaque 500 "Szerver hiba" — a 500 here
+    // reads as a fleet-wide outage and triggers false incidents (2026-06-11: an agent's
+    // hand-written -d body with unescaped specials 500'd; the endpoint was healthy, the
+    // body was bad). Build bodies with jq; the route now rejects bad JSON explicitly.
+    let data: { agent_id?: string; content: string; tier?: string; category?: string; keywords?: string }
+    try {
+      data = JSON.parse(body.toString())
+    } catch {
+      json(res, { error: 'Invalid JSON body — build it with jq, do not hand-write -d' }, 400)
+      return true
+    }
     if (!data.content?.trim()) { json(res, { error: 'Content is required' }, 400); return true }
     if (containsSuspiciousContent(data.content)) {
       logger.warn({ agent: data.agent_id }, 'Memory content rejected: suspicious pattern')

@@ -27,16 +27,16 @@ export type PaneState = 'idle' | 'busy' | 'typing' | 'unknown' | 'error'
 // Code surface and we report 'unknown' rather than guess.
 //
 // The bypass-mode footer has known trailing variants after the
-// "bypass permissions on" prefix: the original "(shift+tab to cycle)"
-// hint, and the background-shells indicator which Claude Code
-// substitutes when one or more BashTool background shells are running
-// in the session. The background-shells indicator itself comes in two
-// shapes depending on whether the tasks panel is visible:
-//   - tasks visible:  "· N shells · ctrl+t to hide tasks · ↓ to manage"
-//   - tasks hidden:   "· N shells · ↓ to manage"
-// All variants must classify as idle, otherwise sessions that spawn
-// background shells (gh poll, file watchers, long-running build) get
-// stuck pending forever.
+// "bypass permissions on" prefix. Observed in the wild:
+//   - "(shift+tab to cycle)"                              (default hint)
+//   - "(shift+tab to cycle) · ← for agents"              (fleet multi-agent build)
+//   - "· N shells · ↓ to manage"                         (bg shells, tasks hidden)
+//   - "· N shells · ctrl+t to hide tasks · ↓ to manage"  (bg shells, tasks shown)
+//   - "· N shells · ← for agents · ↓ to manage"          (fleet build + bg shells)
+// All of these are IDLE surfaces and must match, otherwise a session that
+// merely has a background shell running (astro check, preview server, gh
+// poll, file watcher) is mis-read as not-a-Claude-surface ('unknown') and
+// the scheduler/router silently stop delivering to it forever.
 //
 // The shells-variant requires either the "· ctrl+t" marker or the
 // "· ↓ to manage" tail after the shell count, rather than just the
@@ -57,7 +57,11 @@ export type PaneState = 'idle' | 'busy' | 'typing' | 'unknown' | 'error'
 // shift+tab hint OR any `·`-separated tail ending in a known idle action (ctrl+t
 // / ↓ to manage). Busy states are filtered above (esc to interrupt / busy
 // indicators / paste placeholder), so this stays idle-specific.
-const IDLE_FOOTER_RX = /bypass permissions on(?: \(shift\+tab to cycle\)| · [^\n]*?(?:ctrl\+t|↓ to manage))|\? for shortcuts/
+// LOCAL: `← for agents` kept as an accepted tail. The fleet build renders
+// "· 1 shell · ← for agents · ↓ to manage"; upstream's tails already cover that
+// exact string, but a frame that clips after "← for agents" wedged the loop
+// (2026-06-03 incident), so keep it as an explicit third alternative.
+const IDLE_FOOTER_RX = /bypass permissions on(?: \(shift\+tab to cycle\)| · [^\n]*?(?:ctrl\+t|↓ to manage|← for agents))|\? for shortcuts/
 
 // Positive busy signals. ANY match anywhere in the pane means the turn
 // is mid-flight, even if the footer looks idle for a frame.
@@ -410,6 +414,19 @@ export interface DetectPaneStateOptions {
    * "user actively composing" vs "mid-turn" can distinguish. */
   mergeTypingAsBusy?: boolean
 }
+
+// Busy indicators (the spinner token-counter and "esc to interrupt") render
+// only in the LIVE chrome at the very bottom of the pane. Scanning the WHOLE
+// pane for them lets a FINISHED turn whose transcript merely QUOTES a spinner
+// string pin the idle session as 'busy' forever -- e.g. a liveness check that
+// pasted another agent's "Harmonizing… (13m · ↓5.3k tokens · esc to interrupt)"
+// into its own output. That silently starves the scheduler and message-router
+// (2026-06-03 incident: the loop wedged ~70 min on exactly this).
+//
+// The local fork scoped that scan with an input-box-relative `liveBusyScanRegion`
+// helper; the v1.23.0 merge adopted upstream's simpler fixed BUSY_LIVE_REGION_LINES
+// tail instead (same fix, one rule shared by every call site), so the helper and
+// its BUSY_SCAN_FALLBACK_LOOKBACK constant were removed as dead code.
 
 /**
  * Classify a raw `tmux capture-pane -p` string into a pane state.

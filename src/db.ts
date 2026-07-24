@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, chmodSync, openSync, c
 import { STORE_DIR, DB_FILENAME, ALLOWED_CHAT_ID, OLLAMA_URL, APP_TZ } from './config.js'
 import { getEffectiveSettingValue } from './settings-store.js'
 import { logger } from './logger.js'
+import { listScheduledTasks } from './web/scheduled-tasks-io.js'
+import { computeNextRun } from './web/cron.js'
 import { TOOL_TIMEOUTS } from './tool-timeouts.js'
 
 let db: Database.Database
@@ -2004,11 +2006,32 @@ export function getAgentMessage(id: number): AgentMessage | undefined {
   return db.prepare('SELECT * FROM agent_messages WHERE id = ?').get(id) as AgentMessage | undefined
 }
 
+// Count the ENABLED file-based scheduled tasks. The real tasks live as
+// `~/.claude/scheduled-tasks/<name>/{SKILL.md,task-config.json}` and are
+// read/fired by the schedule runner -- the legacy `scheduled_tasks` SQLite
+// table this used to query is empty, so the heartbeat always reported 0.
+// We reuse listScheduledTasks() (the same reader the runner uses, so the
+// count matches what actually fires) and derive nextRun as the soonest
+// upcoming cron fire across the enabled tasks (preserving the old
+// MIN(next_run) semantics). Anything that throws -- dir absent, malformed
+// JSON, unparseable cron -- degrades gracefully to a 0/null-shaped result
+// rather than crashing the heartbeat.
 export function getActiveScheduledTaskCount(): { count: number; nextRun: number | null } {
-  const row = db
-    .prepare("SELECT COUNT(*) as count, MIN(next_run) as next_run FROM scheduled_tasks WHERE status = 'active'")
-    .get() as { count: number; next_run: number | null }
-  return { count: row.count, nextRun: row.next_run }
+  let nextRun: number | null = null
+  try {
+    const enabled = listScheduledTasks().filter((t) => t.enabled)
+    for (const task of enabled) {
+      try {
+        const next = computeNextRun(task.schedule)
+        if (nextRun === null || next < nextRun) nextRun = next
+      } catch {
+        // Unparseable cron on one task must not drop the whole count.
+      }
+    }
+    return { count: enabled.length, nextRun }
+  } catch {
+    return { count: 0, nextRun: null }
+  }
 }
 
 // --- Pending scheduled-task retries ------------------------------------

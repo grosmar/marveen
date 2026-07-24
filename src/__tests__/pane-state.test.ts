@@ -254,6 +254,69 @@ const IDLE_BACKGROUND_ONE_SHELL_HIDDEN = [
   '  ⏵⏵ bypass permissions on · 1 shell · ↓ to manage',
 ].join('\n')
 
+// Fleet multi-agent build: the bypass footer carries a "· ← for agents"
+// agent-switcher segment. With background shells the live footer becomes
+// "· N shells · ← for agents · ↓ to manage" -- the "← for agents" sits
+// BETWEEN the shell count and "↓ to manage". The pre-2026-06-03 regex
+// pinned the shell count immediately adjacent to its "ctrl+t"/"↓ to manage"
+// tail and so FAILED to match this, classifying an idle PO/designer (which
+// routinely leave a background shell running: astro check, preview server)
+// as 'unknown'. The scheduler and message-router then silently stopped
+// delivering, wedging the autonomous loop. Both fleet footers are idle.
+const IDLE_FLEET_SHELLS = [
+  '  ✻ Cogitated for 3m 4s · 1 shell still running',
+  '',
+  SEP,
+  '❯ ',
+  SEP,
+  '  ⏵⏵ bypass permissions on · 1 shell · ← for agents · ↓ to manage',
+].join('\n')
+
+const IDLE_FLEET_NO_SHELLS = [
+  '',
+  SEP,
+  '❯ ',
+  SEP,
+  '  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents',
+].join('\n')
+
+// 2026-06-03 wedge: a FINISHED turn whose transcript QUOTES another
+// agent's live spinner. A PO liveness check pasted the designer's
+// "Harmonizing… (13m · ↑5.3k tokens · esc to interrupt)" into its own
+// output. The quote sits in scrollback well above the live input box, but
+// the old detector scanned BUSY_INDICATORS across the WHOLE pane and so
+// read the idle PO as 'busy' on every scheduler tick -- the loop wedged
+// ~70 min. The live tail (input box + footer) shows no busy signal, so the
+// pane must classify as idle.
+const IDLE_QUOTED_SPINNER_SCROLLBACK = [
+  '● Designer pane confirms active work — "Harmonizing… (13m · ↑5.3k tokens · esc to interrupt)", a turn in progress.',
+  '',
+  '  Ran 1 shell command',
+  '',
+  '● Waiting for the astro check to confirm the build is clean.',
+  '',
+  '✻ Cogitated for 3m 4s · 1 shell still running',
+  '',
+  SEP,
+  '❯ ',
+  SEP,
+  '  ⏵⏵ bypass permissions on · 1 shell · ← for agents · ↓ to manage',
+].join('\n')
+
+// Same quoted spinner in scrollback BUT the live footer is genuinely busy
+// (a real turn is running now). The live-tail scan must still catch the
+// genuine busy signal -- scoping the scan must not blind us to real work.
+const BUSY_WITH_QUOTED_SPINNER_ABOVE = [
+  '● Earlier I quoted "Harmonizing… (13m · ↑5.3k tokens · esc to interrupt)" here.',
+  '',
+  '✻ Synthesizing… (8s · ↓ 1.2k tokens · esc to interrupt)',
+  '',
+  SEP,
+  '❯ ',
+  SEP,
+  '  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt',
+].join('\n')
+
 // Wedged thinking-block API error. An assistant turn ended with the
 // 400 about thinking blocks that "cannot be modified"; the pane shows
 // the tool-output chrome (`⎿  API Error: ...`), a past-tense thinking
@@ -417,6 +480,33 @@ describe('detectPaneState', () => {
     // and inter-agent messages stalled until the next manual toggle.
     expect(detectPaneState(IDLE_BACKGROUND_SHELLS_HIDDEN)).toBe('idle')
     expect(detectPaneState(IDLE_BACKGROUND_ONE_SHELL_HIDDEN)).toBe('idle')
+  })
+
+  it('detects idle on the fleet "← for agents" footer (with and without shells)', () => {
+    // Regression (2026-06-03 loop wedge): the fleet multi-agent build adds
+    // a "· ← for agents" agent-switcher segment, so the with-shells footer
+    // reads "· 1 shell · ← for agents · ↓ to manage". The old regex pinned
+    // the shell count adjacent to its tail and failed to match, so an idle
+    // PO/designer that had a background shell (astro check, preview server)
+    // was classified 'unknown' and the scheduler/router stopped delivering.
+    expect(detectPaneState(IDLE_FLEET_SHELLS)).toBe('idle')
+    expect(detectPaneState(IDLE_FLEET_NO_SHELLS)).toBe('idle')
+  })
+
+  it('detects idle when scrollback QUOTES a spinner string ("esc to interrupt")', () => {
+    // Regression (2026-06-03 loop wedge): a finished turn whose transcript
+    // quoted another agent's live spinner ("Harmonizing… (..· esc to
+    // interrupt)") pinned the idle PO as 'busy' forever because the old
+    // detector scanned BUSY_INDICATORS across the whole pane. The quote is
+    // in scrollback above the live input box; the live tail is idle.
+    expect(detectPaneState(IDLE_QUOTED_SPINNER_SCROLLBACK)).toBe('idle')
+  })
+
+  it('still detects busy when a real spinner sits below a quoted one', () => {
+    // The complement of the above: scoping the busy scan to the live tail
+    // must not blind us to a genuine running turn just because an old
+    // spinner quote sits higher up in scrollback.
+    expect(detectPaneState(BUSY_WITH_QUOTED_SPINNER_ABOVE)).toBe('busy')
   })
 
   it('does NOT classify a truncated "· N shell" prefix as idle', () => {
