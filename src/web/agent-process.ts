@@ -35,7 +35,7 @@ import {
 } from './ssh-tmux.js'
 import { parseTelegramToken } from './telegram.js'
 import { getProvider, getProviderType, channelStateDir, readChannelToken, type ChannelProviderType } from '../channel-provider.js'
-import { CHANNEL_PROVIDER, MAIN_AGENT_ID, STORE_DIR, PROJECT_ROOT, SUBAGENT_INBOX_TEE, AGENT_SESSION_PREFIX, mainAgentSettingsDir } from '../config.js'
+import { CHANNEL_PROVIDER, MAIN_AGENT_ID, STORE_DIR, PROJECT_ROOT, SUBAGENT_INBOX_TEE, AGENT_SESSION_PREFIX, mainAgentSettingsDir, AI_FLEET_DIR } from '../config.js'
 import { getEffectiveSettingValue } from '../settings-store.js'
 import { loadProfileTemplate } from './profiles.js'
 import { resolveAgentSecurityProfile } from './agent-team.js'
@@ -1084,7 +1084,7 @@ export function startAgentProcess(name: string, opts: { fresh?: boolean } = {}):
     // agent name; a 2nd fleet reuses the role-names, disambiguated by AGENT_SESSION_PREFIX.
     const addDirs: string[] = []
     let roleMcpFlag = ''
-    const aiFleetDir = process.env['AI_FLEET_DIR']
+    const aiFleetDir = AI_FLEET_DIR
     if (aiFleetDir) {
       const allDir = join(aiFleetDir, 'all')
       const roleDir = join(aiFleetDir, 'roles', name)

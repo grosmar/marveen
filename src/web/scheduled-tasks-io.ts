@@ -1,13 +1,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { MAIN_AGENT_ID } from '../config.js'
+import { MAIN_AGENT_ID, SCHEDULED_TASKS_DIR_OVERRIDE } from '../config.js'
 import { atomicWriteFileSync } from './atomic-write.js'
 
 // Per-install override so two fleets under one user don't share one tasks dir
 // (every task would otherwise fire once per fleet). UNSET (every existing install)
-// -> the legacy shared ~/.claude/scheduled-tasks.
-export const SCHEDULED_TASKS_DIR = process.env['SCHEDULED_TASKS_DIR'] ?? join(homedir(), '.claude', 'scheduled-tasks')
+// -> the legacy shared ~/.claude/scheduled-tasks. Sourced from the .env-backed
+// config (SCHEDULED_TASKS_DIR_OVERRIDE), not process.env (unit doesn't populate it).
+export const SCHEDULED_TASKS_DIR = SCHEDULED_TASKS_DIR_OVERRIDE || join(homedir(), '.claude', 'scheduled-tasks')
 
 // Hard cap on the prompt length for a scheduled task, to stop a malicious
 // or accidentally-huge POST body from exhausting the target agent's
