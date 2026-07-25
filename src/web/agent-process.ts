@@ -35,7 +35,7 @@ import {
 } from './ssh-tmux.js'
 import { parseTelegramToken } from './telegram.js'
 import { getProvider, getProviderType, channelStateDir, readChannelToken, type ChannelProviderType } from '../channel-provider.js'
-import { CHANNEL_PROVIDER, MAIN_AGENT_ID, STORE_DIR, PROJECT_ROOT, SUBAGENT_INBOX_TEE } from '../config.js'
+import { CHANNEL_PROVIDER, MAIN_AGENT_ID, STORE_DIR, PROJECT_ROOT, SUBAGENT_INBOX_TEE, AGENT_SESSION_PREFIX, mainAgentSettingsDir } from '../config.js'
 import { getEffectiveSettingValue } from '../settings-store.js'
 import { loadProfileTemplate } from './profiles.js'
 import { resolveAgentSecurityProfile } from './agent-team.js'
@@ -409,7 +409,10 @@ function provisionIsolatedConfigDir(
     // 2. Own settings.json: copy the shared one (keeps hooks etc.) but force
     //    enabledPlugins to this agent's own provider only (all other channel
     //    plugins false), matching the spawn-time scope decision.
-    const sharedSettings = join(realClaude, 'settings.json')
+    // B4: read the main agent's settings from its per-install config dir (falls
+    // back to ~/.claude when unset), so a 2nd fleet's sub-agents copy THEIR hooks,
+    // not the other install's. realClaude still owns the shared symlinks/plugins.
+    const sharedSettings = join(mainAgentSettingsDir(), 'settings.json')
     let settings: Record<string, unknown> = {}
     if (existsSync(sharedSettings)) {
       try { settings = JSON.parse(readFileSync(sharedSettings, 'utf-8')) as Record<string, unknown> }
@@ -556,7 +559,9 @@ function resolveAgentProvider(name: string): ChannelProviderType {
 }
 
 export function agentSessionName(name: string): string {
-  return `agent-${name}`
+  // AGENT_SESSION_PREFIX namespaces sessions so two installs under one Unix user
+  // don't collide on `agent-<name>`. Unset -> legacy `agent-<name>` (byte-identical).
+  return AGENT_SESSION_PREFIX ? `${AGENT_SESSION_PREFIX}-agent-${name}` : `agent-${name}`
 }
 
 // All tmux operations route through these two wrappers so the local-vs-remote
@@ -1072,7 +1077,26 @@ export function startAgentProcess(name: string, opts: { fresh?: boolean } = {}):
     // agent's own cwd .claude/skills/ automatically. LOCAL-ONLY: upstream has no
     // shared-skills mechanism, so this flag must be re-grafted after every merge.
     const sharedSkillsDir = '/home/zubi/marveen/shared-skills'
-    const cmd = `export PATH="/opt/homebrew/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin:$PATH" && ${unsetTokens} && ${promptSuggestionEnv}${mcpEnv}${channelSetup}${apiKeyEnv}${claudeConfigEnv}${oauthTokenEnv}${ollamaEnv}${deepseekEnv}${openrouterEnv}cd "${dir}" && ${claudeBin()} ${continueFlag}${skipFlag}--add-dir "${sharedSkillsDir}" --model '${model}' ${channelFlag}`.trimEnd()
+    // Phase 2 (multi-fleet): layer shared skills + role MCP from a cross-fleet common
+    // repo pointed to by AI_FLEET_DIR. Tiers: <AI_FLEET_DIR>/all + <AI_FLEET_DIR>/roles/<name>,
+    // then the fleet-local shared-skills, then the agent's own cwd .claude/skills (auto).
+    // UNSET AI_FLEET_DIR -> legacy (shared-skills only), byte-identical. Role keys off the
+    // agent name; a 2nd fleet reuses the role-names, disambiguated by AGENT_SESSION_PREFIX.
+    const addDirs: string[] = []
+    let roleMcpFlag = ''
+    const aiFleetDir = process.env['AI_FLEET_DIR']
+    if (aiFleetDir) {
+      const allDir = join(aiFleetDir, 'all')
+      const roleDir = join(aiFleetDir, 'roles', name)
+      if (existsSync(allDir)) addDirs.push(allDir)
+      if (existsSync(roleDir)) addDirs.push(roleDir)
+      // non-strict --mcp-config: additive to the agent's own .mcp.json (never pass --strict-mcp-config)
+      const roleMcp = join(aiFleetDir, 'roles', name, 'mcp.json')
+      if (existsSync(roleMcp)) roleMcpFlag = `--mcp-config "${roleMcp}" `
+    }
+    if (existsSync(sharedSkillsDir)) addDirs.push(sharedSkillsDir)
+    const addDirFlags = addDirs.map((d) => `--add-dir "${d}"`).join(' ')
+    const cmd = `export PATH="/opt/homebrew/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin:$PATH" && ${unsetTokens} && ${promptSuggestionEnv}${mcpEnv}${channelSetup}${apiKeyEnv}${claudeConfigEnv}${oauthTokenEnv}${ollamaEnv}${deepseekEnv}${openrouterEnv}cd "${dir}" && ${claudeBin()} ${continueFlag}${skipFlag}${addDirFlags ? `${addDirFlags} ` : ''}${roleMcpFlag}--model '${model}' ${channelFlag}`.trimEnd()
     runTmux(null, ['new-session', '-d', '-s', session, cmd], { timeout: 10000 })
 
     logger.info({ name, session, channelDir: agentChannelDir }, 'Agent tmux session started')

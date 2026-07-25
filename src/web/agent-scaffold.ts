@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { PROJECT_ROOT, OWNER_NAME, MAIN_AGENT_ID, BOT_NAME, CHANNEL_PROVIDER, WEB_PORT, OWNER_DRIVE_FOLDER, APP_TZ, DASHBOARD_PUBLIC_URL } from '../config.js'
+import { PROJECT_ROOT, OWNER_NAME, MAIN_AGENT_ID, BOT_NAME, CHANNEL_PROVIDER, WEB_PORT, OWNER_DRIVE_FOLDER, APP_TZ, DASHBOARD_PUBLIC_URL, mainAgentSettingsDir } from '../config.js'
 import { channelStateDir } from '../channel-provider.js'
 import { runAgent } from '../agent.js'
 import { atomicWriteFileSync } from './atomic-write.js'
@@ -63,7 +63,7 @@ export function resolveTemplatePlaceholders(content: string): string {
 // Exported so the startup self-heal (hook-registration-guard) can prune stale
 // entries from the same files this module writes.
 export function agentSettingsPath(name: string): string {
-  if (name === MAIN_AGENT_ID) return join(homedir(), '.claude', 'settings.json')
+  if (name === MAIN_AGENT_ID) return join(mainAgentSettingsDir(), 'settings.json')
   return join(agentDir(name), '.claude', 'settings.json')
 }
 

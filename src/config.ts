@@ -1,4 +1,4 @@
-import { hostname } from 'node:os'
+import { hostname, homedir } from 'node:os'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -125,6 +125,23 @@ export const MAIN_AGENT_ID = env['MAIN_AGENT_ID'] ?? 'marveen'
 // existing install) keeps byte-identical service labels and the recovery path
 // (launchctl unload/load, kickstart) still targets the right unit.
 export const SERVICE_ID = env['SERVICE_ID'] ?? MAIN_AGENT_ID
+
+// Optional prefix for sub-agent tmux session names, so two installs under one
+// Unix user don't collide on `agent-<name>`. UNSET (every existing install)
+// keeps the legacy byte-identical `agent-<name>`; a second fleet sets a short slug.
+export const AGENT_SESSION_PREFIX = env['AGENT_SESSION_PREFIX'] ?? ''
+
+// Per-install config dir for the MAIN agent's settings/hooks. When set (a 2nd
+// fleet under one Unix user), the main agent's settings.json AND the source that
+// sub-agent config-isolation copies both live here instead of the shared
+// ~/.claude -> no cross-fleet hook contamination (B4). UNSET (every existing
+// install) -> legacy ~/.claude, byte-identical. Set it in the install's .env so
+// this and the launch-side resolveMainAgentConfigDir() agree on the same dir.
+export const MAIN_AGENT_CONFIG_DIR = env['MAIN_AGENT_CONFIG_DIR'] ?? ''
+export function mainAgentSettingsDir(): string {
+  if (!MAIN_AGENT_CONFIG_DIR) return join(homedir(), '.claude')
+  return MAIN_AGENT_CONFIG_DIR.startsWith('~') ? join(homedir(), MAIN_AGENT_CONFIG_DIR.slice(1)) : MAIN_AGENT_CONFIG_DIR
+}
 
 // Legacy service id from before the OS service units were keyed off SERVICE_ID
 // (the project originally shipped as "claudeclaw"). Retained so the standalone
