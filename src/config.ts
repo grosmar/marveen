@@ -138,6 +138,10 @@ export const AGENT_SESSION_PREFIX = env['AGENT_SESSION_PREFIX'] ?? ''
 // install) -> legacy ~/.claude, byte-identical. Set it in the install's .env so
 // this and the launch-side resolveMainAgentConfigDir() agree on the same dir.
 export const MAIN_AGENT_CONFIG_DIR = env['MAIN_AGENT_CONFIG_DIR'] ?? ''
+
+// Per-install scheduled-tasks dir override (B3), so two fleets under one user don't
+// share ~/.claude/scheduled-tasks. Read via the .env-backed `env`. UNSET -> legacy.
+export const SCHEDULED_TASKS_DIR_OVERRIDE = env['SCHEDULED_TASKS_DIR'] ?? ''
 export function mainAgentSettingsDir(): string {
   if (!MAIN_AGENT_CONFIG_DIR) return join(homedir(), '.claude')
   return MAIN_AGENT_CONFIG_DIR.startsWith('~') ? join(homedir(), MAIN_AGENT_CONFIG_DIR.slice(1)) : MAIN_AGENT_CONFIG_DIR
