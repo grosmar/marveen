@@ -139,11 +139,8 @@ export const AGENT_SESSION_PREFIX = env['AGENT_SESSION_PREFIX'] ?? ''
 // this and the launch-side resolveMainAgentConfigDir() agree on the same dir.
 export const MAIN_AGENT_CONFIG_DIR = env['MAIN_AGENT_CONFIG_DIR'] ?? ''
 
-// Cross-fleet shared "common" repo (ai-fleet). When set, agents layer its
-// all/ + roles/<name>/ skill+MCP tiers at launch. Read via the .env-backed `env`
-// (NOT process.env, which the systemd unit does not populate). UNSET -> legacy.
-export const AI_FLEET_DIR = env['AI_FLEET_DIR'] ?? ''
-// Per-install scheduled-tasks dir override (B3). Read via `env` (.env), not process.env.
+// Per-install scheduled-tasks dir override (B3), so two fleets under one user don't
+// share ~/.claude/scheduled-tasks. Read via the .env-backed `env`. UNSET -> legacy.
 export const SCHEDULED_TASKS_DIR_OVERRIDE = env['SCHEDULED_TASKS_DIR'] ?? ''
 export function mainAgentSettingsDir(): string {
   if (!MAIN_AGENT_CONFIG_DIR) return join(homedir(), '.claude')
