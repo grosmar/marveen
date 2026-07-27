@@ -242,8 +242,8 @@ else
   NODE_FIX_HINT="sudo $PKG_MANAGER install nodejs"
   NPM_FIX_HINT="sudo $PKG_MANAGER install nodejs npm"
 fi
-command -v node &>/dev/null || fail "Node.js telepitese sikertelen. Ellenorizd: $NODE_FIX_HINT"
-command -v npm &>/dev/null || fail "npm nem talalhato a nodejs csomag utan sem. Ellenorizd: $NPM_FIX_HINT"
+command -v node &>/dev/null || fail "Node.js installation failed. Check: $NODE_FIX_HINT"
+command -v npm &>/dev/null || fail "npm not found even after the nodejs package. Check: $NPM_FIX_HINT"
 
 ok "ffmpeg $(ffmpeg -version | awk 'NR==1 {print $3}')"
 ok "git $(git --version | awk '{print $3}')"
@@ -276,7 +276,7 @@ if [ ! -f "$INSTALL_DIR/package.json" ]; then
     # A repo default branch-e a develop, de a publikus telepito main-rol fut
     # (a Windows/WSL wrapper is main-rol fetcheli a scriptet) -> pineljuk a main-t.
     git clone --depth 1 --branch main https://github.com/Szotasz/marveen.git "$TARGET_DIR" \
-      || fail "git clone sikertelen: https://github.com/Szotasz/marveen.git (main branch)"
+      || fail "git clone failed: https://github.com/Szotasz/marveen.git (main branch)"
     ok "Repo klonozva: $TARGET_DIR"
   fi
   echo -e "  Restarting the installer from the checkout..."
@@ -322,10 +322,10 @@ else
     ensure_in_rc 'DISABLE_AUTOUPDATER' 'export DISABLE_AUTOUPDATER=1'
     export DISABLE_AUTOUPDATER=1
     if command -v npm >/dev/null 2>&1; then
-      npm install -g "@anthropic-ai/claude-code@${CLAUDE_PIN}" || warn "npm install sikertelen (@${CLAUDE_PIN})."
+      npm install -g "@anthropic-ai/claude-code@${CLAUDE_PIN}" || warn "npm install failed (pinned version)"
     else
       warn "npm unavailable; trying the pinned official installer (@${CLAUDE_PIN})."
-      curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_PIN}" || warn "pinnelt install.sh sikertelen."
+      curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_PIN}" || warn "pinned official installer failed"
     fi
   else
     echo -e "  Installing Claude Code (official installer, ~/.local/bin)..."
@@ -1562,7 +1562,7 @@ if [ "$CHANNEL_PROVIDER" = "telegram" ] && [ -n "$BOT_TOKEN" ]; then
 
   if [ "$BRIDGE_OK" = "false" ]; then
     warn "The ${CHAN_UNIT} service did not start. Pairing skipped."
-    echo -e "  ${DIM}Ellenorizd: journalctl --user -u ${CHAN_UNIT} -n 30${NC}"
+    echo -e "  ${DIM}Check: journalctl --user -u ${CHAN_UNIT} -n 30${NC}"
     echo -e "  ${DIM}Later: systemctl --user start ${CHAN_UNIT}, then message your bot${NC}"
   else
     ok "Telegram bridge fut"
