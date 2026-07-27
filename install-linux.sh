@@ -151,7 +151,7 @@ if command -v free &>/dev/null; then
     if [ "$TOTAL_SWAP_MB" -lt 1024 ]; then
       read -rp "$(_t prompt_swap)" CREATE_SWAP
       CREATE_SWAP=${CREATE_SWAP:-i}
-      if [ "$CREATE_SWAP" = "i" ]; then
+      if [ "$CREATE_SWAP" = "i" ] || [ "$CREATE_SWAP" = "y" ]; then
         echo -e "  Swap letrehozasa (sudo szukseges)..."
         sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
         if swapon --show | grep -q '/swapfile'; then
@@ -404,7 +404,7 @@ if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
   IS_HEADLESS=true
 fi
 
-if claude auth status &>/dev/null; then
+if claude auth status </dev/null &>/dev/null; then
   ok "Claude mar be van jelentkezve"
 else
   echo -e "  ${ORANGE}Nincs aktiv Claude bejelentkezes.${NC}"
@@ -456,7 +456,7 @@ else
       ensure_in_rc 'CLAUDE_CODE_OAUTH_TOKEN' "export CLAUDE_CODE_OAUTH_TOKEN=\"$OAUTH_TOKEN_INPUT\""
       CLAUDE_AUTH_ENV_LINE="CLAUDE_CODE_OAUTH_TOKEN=${OAUTH_TOKEN_INPUT}"
       # Ellenorzes
-      if claude auth status &>/dev/null; then
+      if claude auth status </dev/null &>/dev/null; then
         ok "OAuth token elfogadva, bejelentkezes sikeres"
       else
         warn "Token beallitva, de az ellenorzes sikertelen -- ellenorizd a tokent."
@@ -480,8 +480,13 @@ fi
 # front of the install script.
 echo ""
 echo -e "  ${DIM}Headless Claude Code teszt...${NC}"
-CLAUDE_PROBE_OUT=$(claude --print "ping" 2>&1 | head -c 200)
-CLAUDE_PROBE_EXIT=$?
+# stdin MUST be detached: `claude --print` reads stdin, and when the installer is
+# driven by a pipe/heredoc it would swallow the queued answers -- the next `read`
+# then hits EOF and set -e aborts in a later, unrelated-looking step.
+_claude_probe_raw=$(claude --print "ping" </dev/null 2>&1)
+CLAUDE_PROBE_EXIT=$?   # claude's own status, NOT `head`'s (pipe would mask a failure)
+CLAUDE_PROBE_OUT=$(printf '%s' "$_claude_probe_raw" | head -c 200)
+unset _claude_probe_raw
 if [ "$CLAUDE_PROBE_EXIT" -eq 0 ] && [ -n "$CLAUDE_PROBE_OUT" ]; then
   ok "Headless Claude Code futtathato (\`claude --print\` valaszolt)"
 else
@@ -573,7 +578,7 @@ if [ "$IS_HEADLESS" = "true" ]; then
   echo -e "${ORANGE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   read -rp "$(_t prompt_vps_continue)" CONTINUE_MCP
   CONTINUE_MCP=${CONTINUE_MCP:-i}
-  if [ "$CONTINUE_MCP" != "i" ]; then
+  if [ "$CONTINUE_MCP" != "i" ] && [ "$CONTINUE_MCP" != "y" ]; then
     echo -e "  ${DIM}Telepites megszakitva. Tiltsd le a felesleges MCP-ket, majd futtasd ujra.${NC}"
     exit 0
   fi
@@ -1078,7 +1083,7 @@ if command -v whisper &>/dev/null; then
 else
   read -rp "$(_t prompt_whisper)" DO_WHISPER
   DO_WHISPER=${DO_WHISPER:-n}
-  if [ "$DO_WHISPER" = "i" ]; then
+  if [ "$DO_WHISPER" = "i" ] || [ "$DO_WHISPER" = "y" ]; then
     pipx install openai-whisper 2>/dev/null &&
       ok "openai-whisper telepitve" ||
       warn "whisper telepites sikertelen (kezzel: pipx install openai-whisper)"
@@ -1553,7 +1558,7 @@ echo -e "${BOLD}Korabbi rendszer koltoztetese${NC}"
 echo -e "${DIM}  Ha volt korabbi AI asszisztensed (OpenClaw, egyeni bot), atmigralhato a memoriai.${NC}"
 read -rp "$(_t prompt_migrate)" DO_MIGRATE
 DO_MIGRATE=${DO_MIGRATE:-n}
-if [ "$DO_MIGRATE" = "i" ]; then
+if [ "$DO_MIGRATE" = "i" ] || [ "$DO_MIGRATE" = "y" ]; then
   if [ -f "$INSTALL_DIR/scripts/migrate.sh" ]; then
     "$INSTALL_DIR/scripts/migrate.sh"
   else
