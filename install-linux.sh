@@ -1028,7 +1028,7 @@ claude plugin marketplace add "$PLUGIN_MARKETPLACE" 2>/dev/null || true
 if claude plugin install "$PLUGIN_ID" 2>/dev/null; then
   ok "${CHANNEL_PROVIDER} plugin installed"
 else
-  echo -e "  ${ORANGE}Elso probalkozas sikertelen, ujraprobalok...${NC}"
+  echo -e "  ${ORANGE}First attempt failed, retrying...${NC}"
   sleep 2
   if claude plugin install "$PLUGIN_ID" 2>/dev/null; then
     ok "${CHANNEL_PROVIDER} plugin installed (on the second attempt)"
@@ -1143,7 +1143,7 @@ ollama_pull() {
   if [ "$status" = "success" ]; then
     ok "$model kesz"
   else
-    warn "$model letoltese sikertelen (status: $status) -- kezzel: ollama pull $model"
+    warn "$model download failed (status: $status) -- manually: ollama pull $model"
   fi
 }
 
@@ -1223,11 +1223,11 @@ else
           _GO_INSTALLED=true
           ok "Go installed (/usr/local/go): ${_GOVERSION}"
         else
-          echo -e "  ${RED}✗${NC} Go tarball kicsomagolas sikertelen."
+          echo -e "  ${RED}✗${NC} Go tarball extraction failed."
         fi
         rm -f "/tmp/${_GOTAR}"
       else
-        echo -e "  ${RED}✗${NC} Go tarball letoltes sikertelen."
+        echo -e "  ${RED}✗${NC} Go tarball download failed."
       fi
     else
       echo -e "  ${RED}✗${NC} Unknown CPU architecture ($_ARCH) -- Go cannot be installed automatically."
@@ -1545,7 +1545,7 @@ fi
 # ─────────────────────────────────────────────
 if [ "$CHANNEL_PROVIDER" = "telegram" ] && [ -n "$BOT_TOKEN" ]; then
   echo ""
-  echo -e "${BOLD}Telegram parositas${NC}"
+  echo -e "${BOLD}Telegram pairing${NC}"
 
   ACCESS_FILE="$CHANNEL_DIR/access.json"
 
