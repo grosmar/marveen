@@ -274,6 +274,22 @@ if [ -n "$_node_bin" ] && [ -f "$INSTALL_DIR/dist/web/agent-process.js" ]; then
 fi
 unset _node_bin
 
+# Multi-fleet: the channel plugin resolves its state dir from homedir()/.claude/channels/<provider>
+# (see the plugin's server.ts -- it hardcodes homedir() and IGNORES CLAUDE_CONFIG_DIR), so every
+# fleet on one host would share ONE token file: a 2nd fleet's plugin then polls the FIRST fleet's
+# bot and its own bot goes silently deaf (updates pile up server-side, no error anywhere). The
+# plugin offers an explicit override, so export it when this install opts in via CHANNEL_STATE_DIR
+# in .env. Unset -> nothing exported == upstream behaviour.
+_chan_state="$(grep -E '^CHANNEL_STATE_DIR=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "\"'")"
+if [ -n "$_chan_state" ]; then
+  mkdir -p "$_chan_state" 2>/dev/null || true
+  case "$CHANNEL_PROVIDER" in
+    telegram) CFG_ENV="${CFG_ENV}export TELEGRAM_STATE_DIR='$_chan_state' && " ;;
+  esac
+  echo "$(date '+%Y-%m-%d %H:%M:%S') channels.sh: channel state dir=$_chan_state" >> "$INSTALL_DIR/store/channels-failures.log"
+fi
+unset _chan_state
+
 # Re-seed hasCompletedOnboarding in the SHARED ~/.claude.json BEFORE launching
 # the main claude. If the key was lost (2026-07-15 bootcamp incident), the
 # fresh TUI parks on the first-run "Select login method" picker -- and the
