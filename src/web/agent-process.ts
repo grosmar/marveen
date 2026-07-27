@@ -1069,13 +1069,6 @@ export function startAgentProcess(name: string, opts: { fresh?: boolean } = {}):
     const promptSuggestionEnv = 'export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false && '
     // Single-quote `${model}` so values like `claude-opus-4-8[1m]` (1M-context
     // suffix) are not glob-expanded by the shell that tmux spawns the command in.
-    // `--add-dir <repo>/shared-skills` loads the fleet-wide SHARED skills from that
-    // folder's .claude/skills/ (zubi #1607: skills live per-agent in the repo, not in
-    // ~/.claude/skills; the CLI --add-dir flag is the only mechanism that actually loads
-    // skills from an extra dir — settings/SDK additionalDirectories do NOT, see issues
-    // anthropics/claude-code#30064 / #37553). Per-agent private skills load from each
-    // agent's own cwd .claude/skills/ automatically. LOCAL-ONLY: upstream has no
-    // shared-skills mechanism, so this flag must be re-grafted after every merge.
     // Skills + MCP are composed into each agent's cwd at fleet-setup time (ai-fleet
     // skills symlinked into .claude/skills, plugin/role MCP merged into .mcp.json),
     // which Claude Code auto-loads from cwd -- so NO --add-dir/--mcp-config graft here.
