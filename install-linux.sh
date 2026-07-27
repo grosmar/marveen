@@ -1133,7 +1133,7 @@ ollama_pull() {
     ok "$model mar letoltve"
     return 0
   fi
-  echo -e "  $model letoltese ($size)..."
+  echo -e "  $model download ($size)..."
   local status
   status=$(curl -s --max-time 600 \
     -X POST http://localhost:11434/api/pull \
@@ -1200,7 +1200,7 @@ else
   fi
   # 2. Hivatalos tarball fallback (ha snap nem elerheto vagy sikertelen)
   if [ "$_GO_INSTALLED" = "false" ]; then
-    echo -e "  Hivatalos Go tarball letoltese (go.dev/dl)..."
+    echo -e "  Downloading the official Go tarball (go.dev/dl)..."
     _ARCH=$(uname -m)
     case "$_ARCH" in
       x86_64)  _GOARCH="amd64" ;;
