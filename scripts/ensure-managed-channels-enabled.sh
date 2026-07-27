@@ -25,7 +25,7 @@ set -u
 case "$(uname -s)" in
   Darwin) MANAGED_FILE="/Library/Application Support/ClaudeCode/managed-settings.json" ;;
   Linux)  MANAGED_FILE="/etc/claude-code/managed-settings.json" ;;
-  *) echo "  channelsEnabled: nem tamogatott OS ($(uname -s)); kihagyva."; exit 0 ;;
+  *) echo "  channelsEnabled: unsupported OS ($(uname -s)); skipped."; exit 0 ;;
 esac
 
 # Root-aware privilege prefix. The managed dir is root-owned on both platforms.
@@ -34,7 +34,7 @@ if [ "$(id -u)" -ne 0 ]; then
   if command -v sudo >/dev/null 2>&1; then
     SUDO="sudo"
   else
-    echo "  ! channelsEnabled: nem root es nincs sudo -- kihagyva."
+    echo "  ! channelsEnabled: not root and no sudo -- skipped."
     echo "    Kezi lepes (root): tedd be a(z) {\"channelsEnabled\": true}-t ide: $MANAGED_FILE"
     exit 0
   fi
@@ -49,12 +49,12 @@ except Exception:
     sys.exit(1)
 PY
 then
-  echo "  channelsEnabled: mar be van kapcsolva ($MANAGED_FILE)"
+  echo "  channelsEnabled: already enabled ($MANAGED_FILE)"
   exit 0
 fi
 
 if ! $SUDO mkdir -p "$(dirname "$MANAGED_FILE")" 2>/dev/null; then
-  echo "  ! channelsEnabled: nem sikerult letrehozni $(dirname "$MANAGED_FILE") -- kezi root-lepes szukseges."
+  echo "  ! channelsEnabled: could not create $(dirname "$MANAGED_FILE") -- a manual root step is required."
   exit 0
 fi
 
@@ -75,10 +75,10 @@ with open(tmp, "w") as f:
 os.replace(tmp, p)
 PY
 then
-  echo "  channelsEnabled=true beallitva a managed-settings-ben ($MANAGED_FILE)"
+  echo "  channelsEnabled=true set in managed-settings ($MANAGED_FILE)"
   echo "    (a bejovo channel-uzenetek team/enterprise orgnal is celba ernek; restart utan lep eletbe.)"
 else
-  echo "  ! channelsEnabled: a managed-settings frissitese sikertelen."
+  echo "  ! channelsEnabled: updating managed-settings failed."
   echo "    Kezi lepes (root): tedd be a(z) {\"channelsEnabled\": true}-t ide: $MANAGED_FILE"
 fi
 exit 0

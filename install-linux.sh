@@ -125,7 +125,7 @@ else
 fi
 echo -e "${DIM}   ▘▘ ▝▝${NC}"
 echo ""
-echo -e "${DIM}  Telepito wizard - Linux (Ubuntu/Debian)${NC}"
+echo -e "${DIM}  Installer wizard - Linux (Ubuntu/Debian)${NC}"
 echo ""
 
 INSTALL_STEP="prerequisites"
@@ -176,7 +176,7 @@ if command -v free &>/dev/null; then
       fi
     fi
   else
-    ok "Memoria: ${TOTAL_RAM_MB} MB RAM + ${TOTAL_SWAP_MB} MB swap"
+    ok "Memory: ${TOTAL_RAM_MB} MB RAM + ${TOTAL_SWAP_MB} MB swap"
   fi
 fi
 
@@ -279,7 +279,7 @@ if [ ! -f "$INSTALL_DIR/package.json" ]; then
       || fail "git clone sikertelen: https://github.com/Szotasz/marveen.git (main branch)"
     ok "Repo klonozva: $TARGET_DIR"
   fi
-  echo -e "  Telepito ujrainditasa a checkoutbol..."
+  echo -e "  Restarting the installer from the checkout..."
   exec bash "$TARGET_DIR/install-linux.sh"
 fi
 
@@ -612,7 +612,7 @@ elif [ "$PROVIDER_CHOICE" = "3" ]; then
 else
   CHANNEL_PROVIDER="telegram"
 fi
-ok "Csatorna: $CHANNEL_PROVIDER"
+ok "Channel: $CHANNEL_PROVIDER"
 
 BOT_TOKEN=""
 SLACK_BOT_TOKEN=""
@@ -1561,7 +1561,7 @@ if [ "$CHANNEL_PROVIDER" = "telegram" ] && [ -n "$BOT_TOKEN" ]; then
   done
 
   if [ "$BRIDGE_OK" = "false" ]; then
-    warn "A ${CHAN_UNIT} service nem indult el. Parositas kihagyva."
+    warn "The ${CHAN_UNIT} service did not start. Pairing skipped."
     echo -e "  ${DIM}Ellenorizd: journalctl --user -u ${CHAN_UNIT} -n 30${NC}"
     echo -e "  ${DIM}Later: systemctl --user start ${CHAN_UNIT}, then message your bot${NC}"
   else
@@ -1694,6 +1694,6 @@ echo -e "  ${DIM}  journalctl --user -u ${DASH_UNIT} -f${NC}    -- dashboard log
 echo -e "  ${DIM}  journalctl --user -u ${CHAN_UNIT} -f${NC}     -- channels logok"
 echo -e "  ${DIM}  ./update.sh${NC}                                  -- update"
 echo -e "  ${DIM}  ./scripts/start.sh${NC}                           $(_t linux.start_hint)"
-echo -e "  ${DIM}  ./scripts/stop.sh${NC}                            -- leallitas"
+echo -e "  ${DIM}  ./scripts/stop.sh${NC}                            -- stop"
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
