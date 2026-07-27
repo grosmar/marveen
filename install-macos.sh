@@ -77,14 +77,14 @@ trap 'on_error $LINENO' ERR
 clear
 echo ""
 echo -e "${BOLD}  ▐▛███▜▌   Marveen${NC}"
-if [[ "${MARVEEN_LANG:-hu}" == "en" ]]; then
+if [[ "${MARVEEN_LANG:-en}" == "en" ]]; then
   echo -e "${BOLD} ▝▜█████▛▘  Your AI team, running while you sleep.${NC}"
 else
   echo -e "${BOLD} ▝▜█████▛▘  $(_t tagline)${NC}"
 fi
 echo -e "${DIM}   ▘▘ ▝▝${NC}"
 echo ""
-if [[ "${MARVEEN_LANG:-hu}" == "en" ]]; then
+if [[ "${MARVEEN_LANG:-en}" == "en" ]]; then
   echo -e "${DIM}  Setup wizard - macOS${NC}"
 else
   echo -e "${DIM}$(_t macos.wizard_title)${NC}"

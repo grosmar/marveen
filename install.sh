@@ -25,7 +25,7 @@ case "$(uname -s)" in
     exec "$(dirname "$0")/install-linux.sh" "$@"
     ;;
   *)
-    if [[ "${MARVEEN_LANG:-hu}" == "en" ]]; then
+    if [[ "${MARVEEN_LANG:-en}" == "en" ]]; then
       echo "Unsupported operating system: $(uname -s)"
       echo "Supported: macOS (Darwin), Linux (Ubuntu/Debian + Fedora/Nobara/RHEL)"
     else

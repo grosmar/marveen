@@ -44,7 +44,7 @@ offer_claude_fallback() {
       return
     fi
   fi
-  echo -e "  ${DIM}Futtasd manualisan:${NC}"
+  echo -e "  ${DIM}Run it manually:${NC}"
   echo -e "  ${DIM}claude \"$(echo "$prompt" | sed 's/"/\\"/g')\"${NC}"
 }
 
@@ -56,7 +56,7 @@ fail() {
 
 on_error() {
   echo ""
-  echo -e "${RED}Varatlan hiba a(z) '${INSTALL_STEP}' lepesben (sor: $1).${NC}"
+  echo -e "${RED}Unexpected error in step '${INSTALL_STEP}' (line: $1).${NC}"
   offer_claude_fallback "$INSTALL_STEP" "Unexpected error at line $1" "$1"
   exit 1
 }
@@ -71,7 +71,7 @@ ensure_in_rc() {
     [ -f "$rc" ] || continue
     grep -qF "$marker" "$rc" 2>/dev/null && continue
     printf '%s\n' "$line" >>"$rc"
-    warn "RC frissitve ($(basename "$rc")): $line"
+    warn "RC updated ($(basename "$rc")): $line"
   done
 }
 
@@ -118,7 +118,7 @@ WEB_PORT="${WEB_PORT:-3420}"
 clear
 echo ""
 echo -e "${BOLD}  ▐▛███▜▌   Marveen${NC}"
-if [[ "${MARVEEN_LANG:-hu}" == "en" ]]; then
+if [[ "${MARVEEN_LANG:-en}" == "en" ]]; then
   echo -e "${BOLD} ▝▜█████▛▘  Your AI team, running while you sleep.${NC}"
 else
   echo -e "${BOLD} ▝▜█████▛▘  $(_t tagline)${NC}"
@@ -145,7 +145,7 @@ elif command -v yum &>/dev/null; then
   PKG_MANAGER="yum"
 fi
 if [ -z "$PKG_MANAGER" ]; then
-  fail "Nem tamogatott csomagkezelo. Ez a telepito apt-get (Debian/Ubuntu) vagy dnf/yum (Fedora/Nobara/RHEL) rendszert var."
+  fail "Unsupported package manager. This installer expects apt-get (Debian/Ubuntu) or dnf/yum (Fedora/Nobara/RHEL)."
 fi
 
 # RAM check: npm build can fail on low-memory instances (e.g. t3.micro)
@@ -160,7 +160,7 @@ if command -v free &>/dev/null; then
       read -rp "$(_t prompt_swap)" CREATE_SWAP
       CREATE_SWAP=${CREATE_SWAP:-i}
       if [ "$CREATE_SWAP" = "i" ] || [ "$CREATE_SWAP" = "y" ]; then
-        echo -e "  Swap letrehozasa (sudo szukseges)..."
+        echo -e "  Creating swap (sudo required)..."
         sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
         if swapon --show | grep -q '/swapfile'; then
           ok "2 GB swap aktivalva"
@@ -169,10 +169,10 @@ if command -v free &>/dev/null; then
             ok "Swap hozzaadva az /etc/fstab-hoz (ujrainditas utan is megmarad)"
           fi
         else
-          warn "Swap letrehozas sikertelen. A build elbukthat."
+          warn "Swap creation failed. The build may fail."
         fi
       else
-        warn "Swap kihagyva. Ha a build elbukik, futtasd: sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
+        warn "Swap skipped. If the build fails, run: sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
       fi
     fi
   else
@@ -266,10 +266,10 @@ ok "unzip" $(unzip -v | awk 'NR==1 {print $2}')
 # klonozzuk a repot egy stabil helyre es ujrafuttatjuk magunkat onnan.
 # git itt mar garantaltan telepitve van (lasd fentebb a [1/7] lepest).
 if [ ! -f "$INSTALL_DIR/package.json" ]; then
-  warn "A telepito a repon kivulrol fut (nincs package.json itt: $INSTALL_DIR)."
+  warn "The installer is running outside the repo (no package.json here: $INSTALL_DIR)."
   TARGET_DIR="$HOME/marveen"
   if [ -f "$TARGET_DIR/package.json" ]; then
-    ok "Meglevo checkout: $TARGET_DIR -- frissites..."
+    ok "Existing checkout: $TARGET_DIR -- updating..."
     git -C "$TARGET_DIR" pull --ff-only 2>/dev/null || warn "git pull kihagyva (helyi valtozasok lehetnek)."
   else
     echo -e "  Repo klonozasa -> ${TARGET_DIR} ..."
@@ -308,14 +308,14 @@ _claude_runs() { command -v claude >/dev/null 2>&1 && timeout 25 claude --versio
 CLAUDE_PIN="2.1.110"
 
 if _claude_runs; then
-  ok "claude mar telepitve es fut: $(claude --version 2>/dev/null || echo 'ok')"
+  ok "claude already installed and running: $(claude --version 2>/dev/null || echo 'ok')"
 else
   # AVX pre-flight: the official installer's Bun binary needs AVX. Only x86
   # (has a `flags :` line in /proc/cpuinfo) can lack it; ARM (`Features :`, no
   # `avx`) runs the arm64 Bun binary fine, so it takes the official path.
   if grep -qE '^flags[[:space:]]*:' /proc/cpuinfo 2>/dev/null && ! grep -qiw avx /proc/cpuinfo 2>/dev/null; then
     warn "A CPU nem tamogatja az AVX-et; a hivatalos installer Bun-binaryja elszallna (SIGILL)."
-    echo -e "  ${DIM}Pinnelt Node-verzio telepitese: @${CLAUDE_PIN} (nehany legfrissebb Claude Code fix kimaradhat, de fut AVX nelkul).${NC}"
+    echo -e "  ${DIM}Installing pinned Node version: @${CLAUDE_PIN} (a few of the newest Claude Code fixes may be missing, but it runs without AVX).${NC}"
     # The auto-updater would replace the pinned Node cli.js with the latest
     # Bun binary on first run -> SIGILL. Disable it persistently (rc files for
     # interactive shells; channels.sh exports it for the agent sessions).
@@ -328,20 +328,20 @@ else
       curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_PIN}" || warn "pinnelt install.sh sikertelen."
     fi
   else
-    echo -e "  Claude Code telepitese (hivatalos installer, ~/.local/bin)..."
+    echo -e "  Installing Claude Code (official installer, ~/.local/bin)..."
     curl -fsSL https://claude.ai/install.sh | bash
   fi
   hash -r
   # Verify the install actually launches -- surfaces an AVX crash HERE with a
   # clear message instead of a cryptic SIGILL at first agent-spawn.
   if _claude_runs; then
-    ok "claude telepitve es fut: $(claude --version 2>/dev/null || echo 'ok')"
+    ok "claude installed and running: $(claude --version 2>/dev/null || echo 'ok')"
   else
-    echo -e "  ${RED}HIBA:${NC} claude telepitve, de nem indul (valoszinuleg AVX-hianyos CPU + Bun-binary)."
+    echo -e "  ${RED}ERROR:${NC} claude is installed but will not start (likely an AVX-less CPU + Bun binary)."
     if command -v npm >/dev/null 2>&1; then
       echo -e "  ${DIM}Probald manualisan: npm install -g @anthropic-ai/claude-code@${CLAUDE_PIN}${NC}"
     else
-      echo -e "  ${DIM}Telepits nvm+node-ot, majd: npm install -g @anthropic-ai/claude-code@${CLAUDE_PIN}${NC}"
+      echo -e "  ${DIM}Install nvm+node, then: npm install -g @anthropic-ai/claude-code@${CLAUDE_PIN}${NC}"
     fi
   fi
 fi
@@ -351,7 +351,7 @@ fi
 # notifications on a team/enterprise org unless managed-settings has
 # channelsEnabled:true (harmless / no-op on a personal org). Idempotent.
 if [ -f "$INSTALL_DIR/scripts/ensure-managed-channels-enabled.sh" ]; then
-  echo -e "  Managed-settings channel-kapu ellenorzese..."
+  echo -e "  Checking the managed-settings channel gate..."
   bash "$INSTALL_DIR/scripts/ensure-managed-channels-enabled.sh" || true
 fi
 
@@ -359,7 +359,7 @@ fi
 if [ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]; then
   ensure_in_rc 'linuxbrew' 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"'
   eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
-  ok "Linuxbrew PATH beallitva"
+  ok "Linuxbrew PATH configured"
 fi
 
 # XDG_RUNTIME_DIR + DBUS: headless szerveren automatikusan beallitjuk
@@ -380,21 +380,21 @@ fi'
   if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ] && [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
     export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
   fi
-  ok "XDG_RUNTIME_DIR / DBUS beallitva (headless)"
+  ok "XDG_RUNTIME_DIR / DBUS configured (headless)"
 fi
 
 # Bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 if command -v bun &>/dev/null; then
-  ok "bun mar telepitve: $(bun --version)"
+  ok "bun already installed: $(bun --version)"
 else
-  echo -e "  Bun telepitese (Telegram plugin fuggoseg)..."
+  echo -e "  Installing Bun (Telegram plugin dependency)..."
   curl -fsSL https://bun.sh/install | bash 2>/dev/null
   if ! command -v bun &>/dev/null; then
-    echo -e "  ${RED}✗${NC} Bun telepites sikertelen. Probalj manualisan: curl -fsSL https://bun.sh/install | bash"
+    echo -e "  ${RED}✗${NC} Bun installation failed. Try manually: curl -fsSL https://bun.sh/install | bash"
   else
-    ok "bun telepitve"
+    ok "bun installed"
   fi
 fi
 ensure_in_rc 'BUN_INSTALL' 'export BUN_INSTALL="$HOME/.bun"'
@@ -415,16 +415,16 @@ fi
 if claude auth status </dev/null &>/dev/null; then
   ok "Claude mar be van jelentkezve"
 else
-  echo -e "  ${ORANGE}Nincs aktiv Claude bejelentkezes.${NC}"
+  echo -e "  ${ORANGE}No active Claude login.${NC}"
   if [ "$IS_HEADLESS" = "true" ]; then
     echo ""
     echo -e "  ${BLUE}Headless szerver detektalva (nincs DISPLAY).${NC}"
-    echo -e "  ${BLUE}Bongeszo-alapu bejelentkezes nem lehetseges.${NC}"
+    echo -e "  ${BLUE}Browser-based login is not possible.${NC}"
     echo -e "  ${BOLD}Ajanlott: OAuth token (2) vagy API key (1).${NC}"
     echo ""
   fi
   echo ""
-  echo -e "  Valassz bejelentkezesi modot:"
+  echo -e "  Choose a login method:"
   echo -e "  ${BOLD}1.${NC} API key ${DIM}(Anthropic Console -> fizeteses/pay-as-you-go)${NC}"
   echo -e "  ${BOLD}2.${NC} OAuth token ${DIM}(Pro/Max elofizetes - tokennel egy masik geprol)${NC}"
   echo -e "  ${BOLD}3.${NC} Kihagyas ${DIM}(kesobb allitod be)${NC}"
@@ -445,7 +445,7 @@ else
       export ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_INPUT"
       ensure_in_rc 'ANTHROPIC_API_KEY' "export ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY_INPUT\""
       CLAUDE_AUTH_ENV_LINE="ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY_INPUT}"
-      ok "ANTHROPIC_API_KEY beallitva"
+      ok "ANTHROPIC_API_KEY configured"
     else
       warn "API key nem lett megadva, kihagyas."
     fi
@@ -454,9 +454,9 @@ else
     echo ""
     echo -e "  ${ORANGE}Lepesek egy boengeszos gepen:${NC}"
     echo -e "  ${BOLD}1.${NC} Nyiss egy terminalt egy olyan gepen ahol van bongeszo"
-    echo -e "  ${BOLD}2.${NC} Futtasd: ${BLUE}claude setup-token${NC}"
+    echo -e "  ${BOLD}2.${NC} Run: ${BLUE}claude setup-token${NC}"
     echo -e "  ${BOLD}3.${NC} A bongeszo megnyilik, jelentkezz be a Claude fiokoddal"
-    echo -e "  ${BOLD}4.${NC} Masold vissza ide a kiirt tokent:"
+    echo -e "  ${BOLD}4.${NC} Paste the printed token back here:"
     echo ""
     read -p "  OAuth token: " OAUTH_TOKEN_INPUT
     if [ -n "$OAUTH_TOKEN_INPUT" ]; then
@@ -465,9 +465,9 @@ else
       CLAUDE_AUTH_ENV_LINE="CLAUDE_CODE_OAUTH_TOKEN=${OAUTH_TOKEN_INPUT}"
       # Ellenorzes
       if claude auth status </dev/null &>/dev/null; then
-        ok "OAuth token elfogadva, bejelentkezes sikeres"
+        ok "OAuth token accepted, login successful"
       else
-        warn "Token beallitva, de az ellenorzes sikertelen -- ellenorizd a tokent."
+        warn "Token set, but verification failed -- check the token."
       fi
     else
       warn "Token nem lett megadva, kihagyas."
@@ -476,7 +476,7 @@ else
   else
     echo -e "  ${DIM}Kihagyva. Kesobb allitsd be:${NC}"
     echo -e "  ${DIM}  export ANTHROPIC_API_KEY=sk-ant-...${NC}"
-    echo -e "  ${DIM}  vagy: claude setup-token (boengeszos gepen), majd export CLAUDE_CODE_OAUTH_TOKEN=...${NC}"
+    echo -e "  ${DIM}  or: claude setup-token (on a machine with a browser), then export CLAUDE_CODE_OAUTH_TOKEN=...${NC}"
   fi
 fi
 
@@ -498,10 +498,10 @@ unset _claude_probe_raw
 if [ "$CLAUDE_PROBE_EXIT" -eq 0 ] && [ -n "$CLAUDE_PROBE_OUT" ]; then
   ok "Headless Claude Code futtathato (\`claude --print\` valaszolt)"
 else
-  warn "Headless Claude Code probe SIKERTELEN. Az agent-letrehozas KESOBB EL fog hasalni."
-  echo -e "    ${DIM}Kimenet: ${CLAUDE_PROBE_OUT:-<ures>}${NC}"
-  echo -e "    ${DIM}Tipikus okok: nincs ervenyes auth, halozati problema, regi claude CLI.${NC}"
-  echo -e "    ${DIM}Javitas: \`claude --version\` -> \`claude /login\` (vagy ANTHROPIC_API_KEY/CLAUDE_CODE_OAUTH_TOKEN beallitas) -> \`claude --print \"ping\"\` ujra.${NC}"
+  warn "Headless Claude Code probe FAILED. Agent creation WILL fail LATER."
+  echo -e "    ${DIM}Output: ${CLAUDE_PROBE_OUT:-<empty>}${NC}"
+  echo -e "    ${DIM}Typical causes: no valid auth, a network problem, an old claude CLI.${NC}"
+  echo -e "    ${DIM}Fix: \`claude --version\` -> \`claude /login\` (or set ANTHROPIC_API_KEY/CLAUDE_CODE_OAUTH_TOKEN) -> \`claude --print \"ping\"\` again.${NC}"
 fi
 
 # Ensure ~/.claude directory tree has correct ownership and permissions.
@@ -559,7 +559,7 @@ try:
 except Exception:
     pass
 PYEOF
-echo -e "  ${GREEN}✓${NC} Claude Code first-run beallitas kesz"
+echo -e "  ${GREEN}✓${NC} Claude Code first-run setup complete"
 
 INSTALL_STEP="personal-info"
 # ─────────────────────────────────────────────
@@ -579,25 +579,25 @@ CHAT_ID="${ALLOWED_CHAT_ID:-0}"
 if [ "$IS_HEADLESS" = "true" ]; then
   echo ""
   echo -e "${ORANGE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  echo -e "${ORANGE}  FIGYELEM: VPS / cloud szerver detektalva${NC}"
-  echo -e "${ORANGE}  Ha a claude.ai fiokodban sok MCP connector van${NC}"
-  echo -e "${ORANGE}  engedelyezve, a headless session megprobalja betolteni${NC}"
-  echo -e "${ORANGE}  mindet, ami instabilitast okozhat.${NC}"
+  echo -e "${ORANGE}  WARNING: VPS / cloud server detected${NC}"
+  echo -e "${ORANGE}  If your claude.ai account has many MCP connectors${NC}"
+  echo -e "${ORANGE}  enabled, the headless session tries to load all of${NC}"
+  echo -e "${ORANGE}  them, which can cause instability.${NC}"
   echo ""
-  echo -e "  ${BOLD}Javasoljuk:${NC} lepj be a claude.ai Settings oldalara es"
-  echo -e "  tiltsd le a felesleges MCP-ket telepites elott."
+  echo -e "  ${BOLD}Recommended:${NC} open the claude.ai Settings page and"
+  echo -e "  disable the unnecessary MCPs before installing."
   echo -e "${ORANGE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   read -rp "$(_t prompt_vps_continue)" CONTINUE_MCP
   CONTINUE_MCP=${CONTINUE_MCP:-i}
   if [ "$CONTINUE_MCP" != "i" ] && [ "$CONTINUE_MCP" != "y" ]; then
-    echo -e "  ${DIM}Telepites megszakitva. Tiltsd le a felesleges MCP-ket, majd futtasd ujra.${NC}"
+    echo -e "  ${DIM}Installation aborted. Disable the unnecessary MCPs, then run again.${NC}"
     exit 0
   fi
 fi
 
 # Channel provider setup
 echo ""
-echo -e "${BOLD}  Csatorna beallitas${NC}"
+echo -e "${BOLD}  Channel setup${NC}"
 echo -e "${DIM}  Melyik csatornan kommunikaljon az AI asszisztensed?${NC}"
 echo -e "  ${BOLD}1.${NC} Telegram (alapertelmezett)"
 echo -e "  ${BOLD}2.${NC} Slack"
@@ -624,20 +624,20 @@ OPERATOR_DISCORD_USER_ID=""
 if [ "$CHANNEL_PROVIDER" = "telegram" ]; then
   echo ""
   echo -e "${DIM}  Az AI asszisztensed Telegramon kommunikal veled.${NC}"
-  echo -e "${DIM}  1. Nyisd meg a @BotFather-t a Telegramban${NC}"
+  echo -e "${DIM}  1. Open @BotFather in Telegram${NC}"
   echo -e "${DIM}  2. Ird be: /newbot${NC}"
   echo -e "${DIM}  3. Adj nevet a botodnak${NC}"
-  echo -e "${DIM}  4. Masold ide a kapott tokent:${NC}"
+  echo -e "${DIM}  4. Paste the token you receive here:${NC}"
   echo ""
   read -rp "$(_t prompt_telegram_token)" BOT_TOKEN
 elif [ "$CHANNEL_PROVIDER" = "discord" ]; then
   echo ""
   echo -e "${DIM}  Az AI asszisztensed Discordon kommunikal veled.${NC}"
   echo -e "${DIM}  1. Hozz letre egy alkalmazast: discord.com/developers/applications${NC}"
-  echo -e "${DIM}  2. Bot fulon: Add Bot, majd masold ki a Tokent${NC}"
+  echo -e "${DIM}  2. On the Bot tab: Add Bot, then copy the Token${NC}"
   echo -e "${DIM}  3. Privileged Gateway Intents: kapcsold be a MESSAGE CONTENT INTENT-et${NC}"
-  echo -e "${DIM}  4. OAuth2 > URL Generator: bot scope, majd hivd meg a szerveredre${NC}"
-  echo -e "${DIM}  5. Masold ki a csatorna ID-jet (Developer Mode > jobb klikk > Copy Channel ID)${NC}"
+  echo -e "${DIM}  4. OAuth2 > URL Generator: bot scope, then invite it to your server${NC}"
+  echo -e "${DIM}  5. Copy the channel ID (Developer Mode > right-click > Copy Channel ID)${NC}"
   echo -e "${DIM}  6. Sajat (operator) user ID: jobb klikk a nevedre > Copy User ID${NC}"
   echo ""
   read -rp "$(_t prompt_discord_bot_token)" DISCORD_BOT_TOKEN
@@ -730,7 +730,7 @@ if c.exists():
 cd["hasCompletedOnboarding"] = True
 c.write_text(json.dumps(cd, indent=2))
 PYISO
-  ok "Fleet-local izolacio: sessions=${AGENT_SESSION_PREFIX}-agent-*, config=${MAIN_AGENT_CONFIG_DIR}"
+  ok "Fleet-local isolation: sessions=${AGENT_SESSION_PREFIX}-agent-*, config=${MAIN_AGENT_CONFIG_DIR}"
 fi
 
 INSTALL_STEP="npm-install"
@@ -743,14 +743,14 @@ cd "$INSTALL_DIR"
 
 echo -e "  npm install..."
 if ! (npm ci --loglevel warn 2>/dev/null || npm install --loglevel warn); then
-  fail "npm install sikertelen. Ellenorizd a hibauzeneteket fentebb."
+  fail "npm install failed. Check the error messages above."
 fi
-ok "npm csomagok telepitve"
+ok "npm packages installed"
 
 INSTALL_STEP="typescript-build"
 echo -e "  TypeScript forditas..."
 if ! npm run build --loglevel warn; then
-  fail "TypeScript forditas sikertelen. Ellenorizd a hibauzeneteket fentebb."
+  fail "TypeScript compilation failed. Check the error messages above."
 fi
 ok "TypeScript leforditva"
 
@@ -769,12 +769,12 @@ fi
 
 mkdir -p "$INSTALL_DIR/store"
 mkdir -p "$INSTALL_DIR/agents"
-ok "Konyvtarak letrehozva"
+ok "Directories created"
 
 INSTALL_STEP="configuration"
 # .env letrehozasa
 echo ""
-echo -e "${BOLD}  Konfiguracio letrehozasa...${NC}"
+echo -e "${BOLD}  Creating configuration...${NC}"
 
 (
   umask 077 && cat >"$INSTALL_DIR/.env" <<ENVEOF
@@ -819,9 +819,9 @@ chmod 600 "$INSTALL_DIR/.env"
 if [ -n "${OAUTH_TOKEN_INPUT:-}" ] && printf '%s' "$OAUTH_TOKEN_INPUT" | grep -Eq '^sk-ant-oat01-[A-Za-z0-9_-]{40,}$'; then
   mkdir -p "$INSTALL_DIR/store"
   (umask 077 && printf '%s' "$OAUTH_TOKEN_INPUT" > "$INSTALL_DIR/store/.claude-oauth-token")
-  ok "Fleet setup-token eltarolva (store/.claude-oauth-token) -- per-agent izolacio aktiv"
+  ok "Fleet setup-token stored (store/.claude-oauth-token) -- per-agent isolation active"
 fi
-ok ".env letrehozva (chmod 600)"
+ok ".env created (chmod 600)"
 
 # CLAUDE.md generalasa template-bol
 if [ -f "$INSTALL_DIR/templates/CLAUDE.md.template" ]; then
@@ -923,7 +923,7 @@ BB_TARGET_TI="$HOME/.claude/tools/bumblebee-threat-intel"
 if [ -d "$BB_SEED_TI" ] && [ ! -d "$BB_TARGET_TI" ]; then
   mkdir -p "$BB_TARGET_TI"
   cp "$BB_SEED_TI"/*.json "$BB_TARGET_TI/" 2>/dev/null
-  ok "Bumblebee threat-intel katalogusok telepitve"
+  ok "Bumblebee threat-intel catalogs installed"
 fi
 
 # Seed config: copy default config files into store/ (idempotent: never overwrite)
@@ -949,11 +949,11 @@ mkdir -p "$CHANNEL_DIR"
 if [ -f "$CHANNEL_DIR/.env" ] && [ -n "${BOT_TOKEN:-}" ] \
    && ! grep -qF "$BOT_TOKEN" "$CHANNEL_DIR/.env" 2>/dev/null; then
   warn "$CHANNEL_DIR/.env mar egy MAS bot tokenjet tartalmazza."
-  echo -e "  ${ORANGE}Ez egy masik Marveen telepites elo csatorna-allapota.${NC}"
+  echo -e "  ${ORANGE}This is another Marveen install's LIVE channel state.${NC}"
   echo -e "  ${ORANGE}Felulirasa azt a fleet-et megnemitja (a botja nem valaszol tobbe).${NC}"
   echo -e "  ${DIM}Tobb fleet egy gepen: futtasd ujra --isolate flaggel (fleet-lokalis${NC}"
   echo -e "  ${DIM}csatorna-allapot), vagy allitsd be a CHANNEL_STATE_DIR env vart.${NC}"
-  fail "channel-allapot utkozes -- megszakitva, hogy a meglevo fleet ne romoljon el."
+  fail "channel-state collision -- aborted so the existing fleet is not broken."
 fi
 
 if [ "$CHANNEL_PROVIDER" = "telegram" ] && [ -n "$BOT_TOKEN" ]; then
@@ -1023,18 +1023,18 @@ else
   PLUGIN_SHORT="slack-channel"
 fi
 
-echo -e "  ${CHANNEL_PROVIDER} plugin telepites..."
+echo -e "  Installing the ${CHANNEL_PROVIDER} plugin..."
 claude plugin marketplace add "$PLUGIN_MARKETPLACE" 2>/dev/null || true
 if claude plugin install "$PLUGIN_ID" 2>/dev/null; then
-  ok "${CHANNEL_PROVIDER} plugin telepitve"
+  ok "${CHANNEL_PROVIDER} plugin installed"
 else
   echo -e "  ${ORANGE}Elso probalkozas sikertelen, ujraprobalok...${NC}"
   sleep 2
   if claude plugin install "$PLUGIN_ID" 2>/dev/null; then
-    ok "${CHANNEL_PROVIDER} plugin telepitve (masodik probalkozesal)"
+    ok "${CHANNEL_PROVIDER} plugin installed (on the second attempt)"
   else
-    echo -e "  ${RED}✗${NC} ${CHANNEL_PROVIDER} plugin telepites sikertelen."
-    echo -e "  ${DIM}  (Lehetseges ok: Claude meg nincs bejelentkezve)${NC}"
+    echo -e "  ${RED}✗${NC} ${CHANNEL_PROVIDER} plugin installation failed."
+    echo -e "  ${DIM}  (Possible cause: Claude is not logged in yet)${NC}"
     echo -e "  Bejelentkezes utan futtasd:"
     echo -e "  ${BLUE}claude plugin install ${PLUGIN_ID}${NC}"
     echo ""
@@ -1047,7 +1047,7 @@ if claude plugin enable "$PLUGIN_SHORT@marveen-marketplace" --scope project 2>/d
    claude plugin enable "$PLUGIN_ID" --scope project 2>/dev/null; then
   ok "${CHANNEL_PROVIDER} plugin project-scope-ban engedelyezve"
 else
-  warn "Plugin project-scope enable sikertelen. Futtasd kezzel:"
+  warn "Plugin project-scope enable failed. Run it manually:"
   echo -e "  ${DIM}cd $INSTALL_DIR && claude plugin enable ${PLUGIN_ID} --scope project${NC}"
 fi
 
@@ -1056,7 +1056,7 @@ SKILLS_DIR="$HOME/.claude/skills"
 if [ -d "$INSTALL_DIR/skills/skill-factory" ]; then
   mkdir -p "$SKILLS_DIR/skill-factory"
   cp -r "$INSTALL_DIR/skills/skill-factory/"* "$SKILLS_DIR/skill-factory/"
-  ok "skill-factory telepitve"
+  ok "skill-factory installed"
 fi
 
 # Seed skills: fleet-level skills from seed-skills/ into ~/.claude/skills/
@@ -1093,20 +1093,20 @@ echo ""
 echo -e "${BOLD}$(_t section_6_linux)${NC}"
 
 # --- Ollama telepites ---
-echo -e "  Ollama ellenorzese (szemantikus memoria kereseshez)..."
+echo -e "  Checking Ollama (for semantic memory search)..."
 if command -v ollama &>/dev/null; then
-  ok "ollama mar telepitve"
+  ok "ollama already installed"
 else
-  echo -e "  Ollama telepitese..."
+  echo -e "  Installing Ollama..."
   # Az ollama telepitoje sudo-val ir a /usr/local/bin-be es allit be systemd service-t.
   # Elore gyorsitotarazzuk a sudo hitelesitest, hogy a gyermek-script sudo prompt-ja ne bukjon el.
   sudo -v 2>/dev/null || true
   # NEM fatalis: ha az ollama telepitoje hibara fut (pl. sudo, halozat, WSL),
   # csak figyelmeztetunk es kihagyjuk a szemantikus memoria lepest -- a telepito megy tovabb.
   if curl -fsSL https://ollama.com/install.sh | sh; then
-    ok "ollama telepitve"
+    ok "ollama installed"
   else
-    warn "ollama telepitese sikertelen -- a szemantikus memoria kereses kimarad."
+    warn "ollama installation failed -- semantic memory search will be skipped."
     echo -e "  ${DIM}Kesobb kezzel: sudo -v && curl -fsSL https://ollama.com/install.sh | sh${NC}"
   fi
 fi
@@ -1153,16 +1153,16 @@ fi  # command -v ollama
 
 # --- Whisper (opcionalis) ---
 echo ""
-echo -e "  Whisper telepites (beszed -> szoveg leirat, opcionalis)..."
+echo -e "  Whisper install (speech -> text transcript, optional)..."
 if command -v whisper &>/dev/null; then
-  ok "whisper mar telepitve"
+  ok "whisper already installed"
 else
   read -rp "$(_t prompt_whisper)" DO_WHISPER
   DO_WHISPER=${DO_WHISPER:-n}
   if [ "$DO_WHISPER" = "i" ] || [ "$DO_WHISPER" = "y" ]; then
     pipx install openai-whisper 2>/dev/null &&
-      ok "openai-whisper telepitve" ||
-      warn "whisper telepites sikertelen (kezzel: pipx install openai-whisper)"
+      ok "openai-whisper installed" ||
+      warn "whisper installation failed (manually: pipx install openai-whisper)"
   else
     echo -e "  ${DIM}Kihagyva. Kesobb: pipx install openai-whisper${NC}"
   fi
@@ -1187,7 +1187,7 @@ _go_version_ok() {
 if _go_version_ok; then
   ok "$(go version | grep -oE 'go[0-9]+\.[0-9.]+')"
 else
-  echo -e "  ${ORANGE}!${NC} Go >= 1.25 szukseges -- telepites..."
+  echo -e "  ${ORANGE}!${NC} Go >= 1.25 required -- installing..."
   _GO_INSTALLED=false
   # 1. snap (Ubuntu/Debian desktop, Fedora, Nobara)
   if command -v snap &>/dev/null; then
@@ -1195,7 +1195,7 @@ else
     if sudo snap install go --classic 2>/dev/null; then
       export PATH="/snap/bin:$PATH"
       _GO_INSTALLED=true
-      ok "Go telepitve (snap)"
+      ok "Go installed (snap)"
     fi
   fi
   # 2. Hivatalos tarball fallback (ha snap nem elerheto vagy sikertelen)
@@ -1221,7 +1221,7 @@ else
           export PATH="$PATH:/usr/local/go/bin"
           ensure_in_rc '/usr/local/go/bin' 'export PATH="$PATH:/usr/local/go/bin"'
           _GO_INSTALLED=true
-          ok "Go telepitve (/usr/local/go): ${_GOVERSION}"
+          ok "Go installed (/usr/local/go): ${_GOVERSION}"
         else
           echo -e "  ${RED}✗${NC} Go tarball kicsomagolas sikertelen."
         fi
@@ -1230,18 +1230,18 @@ else
         echo -e "  ${RED}✗${NC} Go tarball letoltes sikertelen."
       fi
     else
-      echo -e "  ${RED}✗${NC} Ismeretlen CPU architektura ($_ARCH) -- Go nem telepitheto automatikusan."
+      echo -e "  ${RED}✗${NC} Unknown CPU architecture ($_ARCH) -- Go cannot be installed automatically."
     fi
   fi
   if [ "$_GO_INSTALLED" = "false" ]; then
-    echo -e "  ${ORANGE}!${NC} Go telepites sikertelen -- bumblebee kihagyva."
+    echo -e "  ${ORANGE}!${NC} Go installation failed -- bumblebee skipped."
     echo -e "  ${DIM}  Kezzel: sudo snap install go --classic  VAGY  https://go.dev/dl${NC}"
   fi
 fi
 
 BUMBLEBEE_BIN="$HOME/.local/bin/bumblebee"
 if [ -x "$BUMBLEBEE_BIN" ]; then
-  ok "bumblebee mar telepitve ($BUMBLEBEE_BIN)"
+  ok "bumblebee already installed ($BUMBLEBEE_BIN)"
 elif _go_version_ok; then
   echo -e "  bumblebee build forrasbol (github.com/perplexityai/bumblebee)..."
   mkdir -p "$HOME/.local/bin"
@@ -1249,7 +1249,7 @@ elif _go_version_ok; then
   if git clone -q --depth 1 --branch v0.1.2 https://github.com/perplexityai/bumblebee.git "$_BB_TMP" 2>/dev/null; then
     if (cd "$_BB_TMP" && go build -o "$BUMBLEBEE_BIN" ./cmd/bumblebee 2>/dev/null); then
       chmod +x "$BUMBLEBEE_BIN"
-      ok "bumblebee telepitve: $BUMBLEBEE_BIN"
+      ok "bumblebee installed: $BUMBLEBEE_BIN"
     else
       echo -e "  ${ORANGE}!${NC} bumblebee build sikertelen -- a supply-chain scan kihagyja a binart."
       echo -e "  ${DIM}  Kezzel: cd /tmp/bb && go build -o ~/.local/bin/bumblebee ./cmd/bumblebee${NC}"
@@ -1460,7 +1460,7 @@ if loginctl show-user "$USER" 2>/dev/null | grep -q "Linger=yes"; then
 elif sudo loginctl enable-linger "$USER" 2>/dev/null; then
   ok "loginctl linger engedelyezve ($USER)"
 else
-  warn "loginctl linger nem sikerult -- a servicek esetleg nem indulnak el boot utan (sudo szukseges)"
+  warn "loginctl linger failed -- services may not start after boot (sudo required)"
 fi
 
 # 2. XDG_RUNTIME_DIR + DBUS garantalasa systemctl --user-hoz
@@ -1528,13 +1528,13 @@ echo ""
 echo -e "${BOLD}$(_t section_checks)${NC}"
 if [ "$CHANNEL_PROVIDER" = "telegram" ] && ! command -v bun &>/dev/null; then
   echo -e "  ${RED}✗${NC} Bun nem talalhato. A Telegram plugin nem fog mukodni."
-  echo -e "  ${BOLD}Javitas:${NC} curl -fsSL https://bun.sh/install | bash"
+  echo -e "  ${BOLD}Fix:${NC} curl -fsSL https://bun.sh/install | bash"
   echo -e "  ${DIM}Utana: source ~/.bashrc && ./scripts/start.sh${NC}"
 fi
 PLUGIN_CHECK_PATTERN="${CHANNEL_PROVIDER}"
 if ! claude plugin list 2>/dev/null | grep -q "$PLUGIN_CHECK_PATTERN"; then
-  echo -e "  ${RED}✗${NC} ${CHANNEL_PROVIDER} plugin nincs telepitve."
-  echo -e "  ${BOLD}Javitas:${NC} claude plugin install ${PLUGIN_ID}"
+  echo -e "  ${RED}✗${NC} ${CHANNEL_PROVIDER} plugin is not installed."
+  echo -e "  ${BOLD}Fix:${NC} claude plugin install ${PLUGIN_ID}"
   echo -e "  ${DIM}Utana: systemctl --user restart ${CHAN_UNIT}${NC}"
 else
   ok "${CHANNEL_PROVIDER} plugin ellenorizve"
@@ -1563,13 +1563,13 @@ if [ "$CHANNEL_PROVIDER" = "telegram" ] && [ -n "$BOT_TOKEN" ]; then
   if [ "$BRIDGE_OK" = "false" ]; then
     warn "A ${CHAN_UNIT} service nem indult el. Parositas kihagyva."
     echo -e "  ${DIM}Ellenorizd: journalctl --user -u ${CHAN_UNIT} -n 30${NC}"
-    echo -e "  ${DIM}Kesobb: systemctl --user start ${CHAN_UNIT}, majd irj a botodnak${NC}"
+    echo -e "  ${DIM}Later: systemctl --user start ${CHAN_UNIT}, then message your bot${NC}"
   else
     ok "Telegram bridge fut"
     echo ""
-    echo -e "  ${BOLD}1.${NC} Nyisd meg a Telegram appot es irj a botodnak (barmit, pl. \"Szia\")"
+    echo -e "  ${BOLD}1.${NC} Open the Telegram app and message your bot (anything, e.g. \"Hi\")"
     echo -e "  ${BOLD}2.${NC} A bot valaszol egy parosito kodot"
-    echo -e "  ${BOLD}3.${NC} Masold ide a kapott kodot:"
+    echo -e "  ${BOLD}3.${NC} Paste the code you receive here:"
     echo ""
     read -rp "$(_t prompt_pair_code)" PAIR_CODE
 
@@ -1605,8 +1605,8 @@ with open('$ACCESS_FILE', 'w') as f:
 " 2>/dev/null
           CHAT_ID="$PENDING_CHAT_ID"
           sed -i "s/^ALLOWED_CHAT_ID=.*/ALLOWED_CHAT_ID=${CHAT_ID}/" "$INSTALL_DIR/.env"
-          ok "Parositas sikeres! (chat ID: $PENDING_CHAT_ID)"
-          ok ".env ALLOWED_CHAT_ID frissitve"
+          ok "Pairing successful! (chat ID: $PENDING_CHAT_ID)"
+          ok ".env ALLOWED_CHAT_ID updated"
           ok "Policy: allowlist (csak te erheted el a botot)"
           # Ujrainditjuk, hogy felvegye az uj access.json-t
           systemctl --user restart "${CHAN_UNIT}" 2>/dev/null || true
@@ -1621,7 +1621,7 @@ with open('$ACCESS_FILE', 'w') as f:
       fi
     else
       echo -e "  ${DIM}Rendben, kesobb is parosithatsz.${NC}"
-      echo -e "  ${DIM}Futtasd: claude, majd /telegram:access pair AKOD${NC}"
+      echo -e "  ${DIM}Run: claude, then /telegram:access pair YOURCODE${NC}"
     fi
   fi
 fi
@@ -1650,10 +1650,10 @@ if [ "$CHANNEL_PROVIDER" = "telegram" ] && [ "$CHAT_ID" = "0" ]; then
   echo -e "${ORANGE}  Az ALLOWED_CHAT_ID=0 marad az .env-ben, ami azt jelenti${NC}"
   echo -e "${ORANGE}  hogy a bot NEM fog valaszolni senkinek.${NC}"
   echo ""
-  echo -e "  ${BOLD}Javitas:${NC}"
-  echo -e "  1. Irj a botodnak Telegramon (barmit)"
-  echo -e "  2. Masold a kapott parosito kodot"
-  echo -e "  3. Futtasd: ${BOLD}claude${NC}, majd ${BOLD}/telegram:access pair AKOD${NC}"
+  echo -e "  ${BOLD}Fix:${NC}"
+  echo -e "  1. Message your bot on Telegram (anything)"
+  echo -e "  2. Copy the pairing code you receive"
+  echo -e "  3. Run: ${BOLD}claude${NC}, then ${BOLD}/telegram:access pair YOURCODE${NC}"
   echo -e "${ORANGE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 fi
 
@@ -1678,21 +1678,21 @@ else
   echo -e "  ${DIM}(A tokenes URL-t a szerver logban talalod)${NC}"
 fi
 echo ""
-echo -e "  ${DIM}VPS/szerver eleres tavolrol:${NC}"
-echo -e "  ${DIM}  A .env fajlba ird: WEB_HOST=0.0.0.0${NC}"
+echo -e "  ${DIM}Remote access to the VPS/server:${NC}"
+echo -e "  ${DIM}  Put this in .env: WEB_HOST=0.0.0.0${NC}"
 echo -e "  ${DIM}  Majd: systemctl --user restart ${DASH_UNIT}${NC}"
-echo -e "  ${BOLD}Telegram:${NC} Irj a botodnak!"
+echo -e "  ${BOLD}Telegram:${NC} Message your bot!"
 echo ""
-echo -e "  ${DIM}Kovetkezo lepesek:${NC}"
-echo -e "  ${DIM}1. Nyisd meg a dashboardot a fenti URL-lel${NC}"
-echo -e "  ${DIM}2. Irj a botodnak Telegramon -- mar valaszolnia kell${NC}"
+echo -e "  ${DIM}Next steps:${NC}"
+echo -e "  ${DIM}1. Open the dashboard with the URL above${NC}"
+echo -e "  ${DIM}2. Message your bot on Telegram -- it should reply now${NC}"
 echo -e "  ${DIM}3. A Csapat oldalon hozhatsz letre tobb agenst${NC}"
 echo ""
-echo -e "  ${DIM}Hasznos parancsok:${NC}"
+echo -e "  ${DIM}Useful commands:${NC}"
 echo -e "  ${DIM}  systemctl --user status ${DASH_UNIT} ${CHAN_UNIT} --no-pager${NC}"
 echo -e "  ${DIM}  journalctl --user -u ${DASH_UNIT} -f${NC}    -- dashboard logok"
 echo -e "  ${DIM}  journalctl --user -u ${CHAN_UNIT} -f${NC}     -- channels logok"
-echo -e "  ${DIM}  ./update.sh${NC}                                  -- frissites"
+echo -e "  ${DIM}  ./update.sh${NC}                                  -- update"
 echo -e "  ${DIM}  ./scripts/start.sh${NC}                           $(_t linux.start_hint)"
 echo -e "  ${DIM}  ./scripts/stop.sh${NC}                            -- leallitas"
 echo ""
