@@ -324,7 +324,7 @@ else
     if command -v npm >/dev/null 2>&1; then
       npm install -g "@anthropic-ai/claude-code@${CLAUDE_PIN}" || warn "npm install sikertelen (@${CLAUDE_PIN})."
     else
-      warn "npm nem elerheto; a pinnelt hivatalos installert probalom (@${CLAUDE_PIN})."
+      warn "npm unavailable; trying the pinned official installer (@${CLAUDE_PIN})."
       curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_PIN}" || warn "pinnelt install.sh sikertelen."
     fi
   else
@@ -643,7 +643,7 @@ elif [ "$CHANNEL_PROVIDER" = "discord" ]; then
   read -rp "$(_t prompt_discord_bot_token)" DISCORD_BOT_TOKEN
   read -rp "$(_t prompt_discord_channel_id)" DISCORD_CHANNEL_ID
   echo ""
-  echo -e "${DIM}  Az operator user ID-re a parositashoz kell: amikor egy uj felhasznalo${NC}"
+  echo -e "${DIM}  The operator user ID is needed for pairing: when a new user${NC}"
   echo -e "${DIM}  DM-et ir a botnak, a bot ezen az ID-n ertesit teged jovahagyasert.${NC}"
   read -rp "$(_t prompt_discord_user_id)" OPERATOR_DISCORD_USER_ID
 else
@@ -1255,7 +1255,7 @@ elif _go_version_ok; then
       echo -e "  ${DIM}  Kezzel: cd /tmp/bb && go build -o ~/.local/bin/bumblebee ./cmd/bumblebee${NC}"
     fi
   else
-    echo -e "  ${ORANGE}!${NC} bumblebee clone sikertelen (halozat?) -- kihagyva."
+    echo -e "  ${ORANGE}!${NC} bumblebee clone failed (network?) -- skipped."
   fi
   rm -rf "$_BB_TMP"
 else
@@ -1496,7 +1496,7 @@ if pidof systemd >/dev/null 2>&1 && systemctl --user status >/dev/null 2>&1; the
   done
   [ "$SVCFAIL" -eq 0 ] && ok "Mindket szolgaltatas fut"
 else
-  warn "systemd --user nem elerheto (WSL / konteneren / VPS user-session nelkul) -- kozvetlen inditas."
+  warn "systemd --user unavailable (WSL / container / VPS without a user session) -- starting directly."
   mkdir -p "$INSTALL_DIR/store"
   # Root VPS/container: claude refuses --dangerously-skip-permissions as uid 0,
   # which would kill the agent tmux sessions the dashboard spawns. Opt into the
