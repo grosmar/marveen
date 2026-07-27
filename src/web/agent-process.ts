@@ -946,11 +946,18 @@ export function startAgentProcess(name: string, opts: { fresh?: boolean } = {}):
     // e.g. for routing this agent to a separate Anthropic login). When the
     // agent-config field is missing or blank, claudeConfigDir is null and we
     // emit no export, preserving the default Claude Code behavior.
-    // An explicit per-agent config dir wins. Otherwise, a channel sub-agent gets
-    // an auto-provisioned isolated config dir so its plugin install cannot collide
-    // with the rest of the fleet in the shared ~/.claude (see
-    // ensureIsolatedChannelConfigDir). The main agent comes up via channels.sh and
-    // keeps the shared root. Isolation is GATED on the fleet OAuth token: the
+    // An explicit per-agent config dir wins. Otherwise EVERY sub-agent gets an
+    // auto-provisioned isolated config dir. It was originally gated on hasChannel
+    // (the plugin-slot collision below only bit agents that load a channel plugin),
+    // but the config dir also owns the agent's settings.json -- i.e. its HOOKS. On a
+    // multi-fleet host the shared ~/.claude belongs to whichever install was set up
+    // first, so a channel-LESS sub-agent of a second fleet would run the FIRST
+    // fleet's hooks (wrong dashboard port + wrong token) and write its memory into
+    // the other fleet's store. Ownership of settings/hooks has nothing to do with
+    // channels, so the gate is dropped; scopeChannelPlugins() simply disables every
+    // channel plugin for an agent that has no token. The main agent comes up via
+    // channels.sh and keeps its own dir. Isolation stays GATED on the fleet OAuth
+    // token: the
     // isolated dir carries no .credentials.json, so without CLAUDE_CODE_OAUTH_TOKEN
     // the sub-agent would launch logged-out -- so when the token is absent we skip
     // isolation and keep the shared ~/.claude (the pre-isolation, still-stable
@@ -982,7 +989,7 @@ export function startAgentProcess(name: string, opts: { fresh?: boolean } = {}):
     if (!claudeConfigDir && hasFleetOauthToken()) {
       oauthTokenEnv = `export CLAUDE_CODE_OAUTH_TOKEN="$(cat '${FLEET_OAUTH_TOKEN_PATH}')" && `
     }
-    if (!claudeConfigDir && hasChannel && name !== MAIN_AGENT_ID) {
+    if (!claudeConfigDir && name !== MAIN_AGENT_ID) {
       if (hasFleetOauthToken()) {
         // Token present -> isolation works; any earlier degradation is resolved,
         // so re-arm the one-shot alert for a future token loss.
