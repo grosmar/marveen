@@ -30,6 +30,21 @@ function containsSuspiciousContent(content: string): boolean {
   return SUSPICIOUS_PATTERNS.some((pattern) => pattern.test(content))
 }
 
+// keywords is stored as a TEXT column, but agents legitimately send it either as a
+// comma-string ("a, b") or as a JSON array (["a","b"]). An array reached SQLite raw
+// and threw an uncaught bind error → opaque 500 "Szerver hiba" that reads as a
+// fleet-wide memory outage (content agent, 2026-07-26; same false-incident class the
+// JSON-body guard above prevents). Normalise both shapes to a comma-string so a write
+// never silently drops a learning. Non-string/array values are ignored, not fatal.
+function normalizeKeywords(kw: unknown): string | undefined {
+  if (Array.isArray(kw)) {
+    const joined = kw.filter(k => typeof k === 'string' && k.trim()).join(', ').trim()
+    return joined || undefined
+  }
+  if (typeof kw === 'string') return kw.trim() || undefined
+  return undefined
+}
+
 export async function tryHandleMemories(ctx: RouteContext): Promise<boolean> {
   const { req, res, path, method, url } = ctx
 
@@ -39,7 +54,7 @@ export async function tryHandleMemories(ctx: RouteContext): Promise<boolean> {
     // reads as a fleet-wide outage and triggers false incidents (2026-06-11: an agent's
     // hand-written -d body with unescaped specials 500'd; the endpoint was healthy, the
     // body was bad). Build bodies with jq; the route now rejects bad JSON explicitly.
-    let data: { agent_id?: string; content: string; tier?: string; category?: string; keywords?: string }
+    let data: { agent_id?: string; content: string; tier?: string; category?: string; keywords?: string | string[] }
     try {
       data = JSON.parse(body.toString())
     } catch {
@@ -64,7 +79,7 @@ export async function tryHandleMemories(ctx: RouteContext): Promise<boolean> {
       data.agent_id || MAIN_AGENT_ID,
       data.content.trim(),
       category,
-      data.keywords || undefined,
+      normalizeKeywords(data.keywords),
       true
     )
     json(res, { ok: true, id: result.id })
@@ -237,8 +252,8 @@ Respond ONLY with JSON, nothing else:
   if (memUpdateMatch && method === 'PUT') {
     const id = parseInt(memUpdateMatch[1], 10)
     const body = await readBody(req)
-    const { content, category, tier, agent_id, keywords } = JSON.parse(body.toString()) as { content: string; category?: string; tier?: string; agent_id?: string; keywords?: string }
-    if (updateMemory(id, content, tier || category, agent_id, keywords)) { json(res, { ok: true }); return true }
+    const { content, category, tier, agent_id, keywords } = JSON.parse(body.toString()) as { content: string; category?: string; tier?: string; agent_id?: string; keywords?: string | string[] }
+    if (updateMemory(id, content, tier || category, agent_id, normalizeKeywords(keywords))) { json(res, { ok: true }); return true }
     json(res, { error: 'Memory not found' }, 404)
     return true
   }
