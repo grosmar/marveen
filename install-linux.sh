@@ -931,14 +931,20 @@ fi
 if [ "$CHANNEL_PROVIDER" = "telegram" ] && [ -n "$BOT_TOKEN" ]; then
   (umask 077 && echo "TELEGRAM_BOT_TOKEN=$BOT_TOKEN" >"$CHANNEL_DIR/.env")
   chmod 600 "$CHANNEL_DIR/.env"
+  # The plugin ENFORCES access.json, not .env's ALLOWED_CHAT_ID. Seed allowFrom when
+  # the chat id is already known, otherwise a pre-seeded ALLOWED_CHAT_ID still leaves
+  # the bot refusing every message (two sources of truth, silently disagreeing).
+  _tg_allow='[]'
+  if [ -n "${CHAT_ID:-}" ] && [ "$CHAT_ID" != "0" ]; then _tg_allow="[\"$CHAT_ID\"]"; fi
   cat >"$CHANNEL_DIR/access.json" <<ACCESSEOF
 {
   "dmPolicy": "pairing",
-  "allowFrom": [],
+  "allowFrom": $_tg_allow,
   "groups": {},
   "pending": {}
 }
 ACCESSEOF
+  unset _tg_allow
   ok "$(_t linux.tg_channel_configured)"
 elif [ "$CHANNEL_PROVIDER" = "slack" ] && [ -n "$SLACK_BOT_TOKEN" ]; then
   (umask 077 && cat >"$CHANNEL_DIR/.env" <<SLACKENVEOF
