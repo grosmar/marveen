@@ -570,7 +570,10 @@ echo -e "${BOLD}$(_t section_4_linux)${NC}"
 read -rp "$(_t prompt_your_name)" OWNER_NAME
 # Chat ID is NOT asked here -- the user doesn't know it yet.
 # It will be set automatically during the Telegram pairing flow.
-CHAT_ID="0"
+# Pre-seedable for unattended installs: if the operator already knows the chat id
+# (e.g. re-installing a fleet that was paired before) ALLOWED_CHAT_ID=<id> skips the
+# interactive pairing round-trip. Default 0 = pair later, as before.
+CHAT_ID="${ALLOWED_CHAT_ID:-0}"
 
 # VPS/cloud MCP warning (headless only)
 if [ "$IS_HEADLESS" = "true" ]; then
