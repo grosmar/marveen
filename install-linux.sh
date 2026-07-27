@@ -906,7 +906,7 @@ if [ -d "$SEED_SCHED_DIR" ]; then
     SCHED_NEW=$((SCHED_NEW + 1))
   done
   if [ "$SCHED_NEW" -gt 0 ] || [ "$SCHED_SKIP" -gt 0 ]; then
-    ok "Seed scheduled tasks: ${SCHED_NEW} uj, ${SCHED_SKIP} kihagyva"
+    ok "Seed scheduled tasks: ${SCHED_NEW} new, ${SCHED_SKIP} skipped"
   fi
   if [ "$SCHED_NEW" -gt 0 ]; then
     STATE_FILE="$INSTALL_DIR/store/kanban-audit-state.json"
@@ -1081,7 +1081,7 @@ if [ -d "$SEED_SKILLS_DIR" ]; then
     SEED_NEW=$((SEED_NEW + 1))
   done
   if [ "$SEED_NEW" -gt 0 ] || [ "$SEED_SKIP" -gt 0 ]; then
-    ok "Seed skills: ${SEED_NEW} uj, ${SEED_SKIP} kihagyva (mar letezik)"
+    ok "Seed skills: ${SEED_NEW} new, ${SEED_SKIP} skipped (already present)"
   fi
 fi
 
@@ -1259,7 +1259,7 @@ elif _go_version_ok; then
   fi
   rm -rf "$_BB_TMP"
 else
-  echo -e "  ${ORANGE}!${NC} Go nem elerheto -- bumblebee kihagyva. A supply-chain scan atlepve."
+  echo -e "  ${ORANGE}!${NC} Go unavailable -- bumblebee skipped. The supply-chain scan is skipped."
   echo -e "  ${DIM}  Kezzel: sudo snap install go --classic && git clone https://github.com/perplexityai/bumblebee /tmp/bb && (cd /tmp/bb && go build -o ~/.local/bin/bumblebee ./cmd/bumblebee)${NC}"
 fi
 
