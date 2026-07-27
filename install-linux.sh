@@ -270,7 +270,7 @@ if [ ! -f "$INSTALL_DIR/package.json" ]; then
   TARGET_DIR="$HOME/marveen"
   if [ -f "$TARGET_DIR/package.json" ]; then
     ok "Existing checkout: $TARGET_DIR -- updating..."
-    git -C "$TARGET_DIR" pull --ff-only 2>/dev/null || warn "git pull kihagyva (helyi valtozasok lehetnek)."
+    git -C "$TARGET_DIR" pull --ff-only 2>/dev/null || warn "git pull skipped (local changes?)"
   else
     echo -e "  Repo klonozasa -> ${TARGET_DIR} ..."
     # A repo default branch-e a develop, de a publikus telepito main-rol fut
