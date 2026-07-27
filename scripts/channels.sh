@@ -252,6 +252,7 @@ MODEL_FLAG=""
 # prints nothing, CFG_ENV stays EMPTY and the agent keeps the shared ~/.claude --
 # strict no-op for existing installs (no setting, no fleet token, no dist build).
 CFG_ENV=""
+_main_cfg_dir_resolved=""
 mkdir -p "$INSTALL_DIR/store" 2>/dev/null || true
 _node_bin="$(command -v node || true)"
 if [ -n "$_node_bin" ] && [ -f "$INSTALL_DIR/dist/web/agent-process.js" ]; then
@@ -278,6 +279,9 @@ if [ -n "$_node_bin" ] && [ -f "$INSTALL_DIR/dist/web/agent-process.js" ]; then
       CFG_ENV="export CLAUDE_CONFIG_DIR='$_cfg_dir' && export CLAUDE_CODE_OAUTH_TOKEN=\"\$(cat '$INSTALL_DIR/store/.claude-oauth-token')\" && "
     fi
     echo "$(date '+%Y-%m-%d %H:%M:%S') channels.sh: main-agent $_cfg_mode CLAUDE_CONFIG_DIR=$_cfg_dir" >> "$INSTALL_DIR/store/channels-failures.log"
+    # Remember it: the hasCompletedOnboarding seed below must write into the config
+    # dir claude will actually read, not the shared $HOME one.
+    _main_cfg_dir_resolved="$_cfg_dir"
   fi
   unset _cfg_line _cfg_mode _cfg_dir
 fi
@@ -307,9 +311,16 @@ unset _chan_state
 # for Claude Code to recover. Mirrors ensureSharedClaudeOnboarded() (the
 # in-process respawn paths); this covers the channels.sh cold-boot path.
 if command -v node >/dev/null 2>&1; then
-  node -e '
+  MAIN_AGENT_CFG_DIR="$_main_cfg_dir_resolved" node -e '
     const fs = require("fs")
-    const p = require("path").join(require("os").homedir(), ".claude.json")
+    // The flag must land in the config dir claude will ACTUALLY read. With
+    // MAIN_AGENT_CONFIG_DIR / install --isolate that is the fleet-local dir, so
+    // seeding only $HOME/.claude.json left the fleet-local file without it and the
+    // TUI parked on the first-run login screen -- headless, forever, silently.
+    const _cfgDir = process.env.MAIN_AGENT_CFG_DIR || ""
+    const p = _cfgDir
+      ? require("path").join(_cfgDir, ".claude.json")
+      : require("path").join(require("os").homedir(), ".claude.json")
     try {
       let j = {}
       if (fs.existsSync(p)) j = JSON.parse(fs.readFileSync(p, "utf-8"))
