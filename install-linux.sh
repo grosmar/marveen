@@ -702,6 +702,34 @@ if [ "${FLEET_ISOLATE:-0}" = "1" ]; then
   SCHEDULED_TASKS_DIR="${SCHEDULED_TASKS_DIR:-$INSTALL_DIR/store/scheduled-tasks}"
   CHANNEL_STATE_DIR="${CHANNEL_STATE_DIR:-$MAIN_AGENT_CONFIG_DIR/channels/$CHANNEL_PROVIDER}"
   mkdir -p "$MAIN_AGENT_CONFIG_DIR" "$SCHEDULED_TASKS_DIR" "$CHANNEL_STATE_DIR"
+  # Mirror the first-run flags into the FLEET-LOCAL config dir. The earlier
+  # first-run seeding necessarily targets $HOME/.claude (it runs before the fleet
+  # dir is known), but with an isolated dir claude reads THAT settings.json --
+  # without skipDangerousModePermissionPrompt the headless session parks on the
+  # --dangerously-skip-permissions dialog with no TTY and rapid-exits.
+  # Merge, never clobber: the dashboard scaffolds its hooks into the same file.
+  MAIN_AGENT_CONFIG_DIR="$MAIN_AGENT_CONFIG_DIR" python3 - <<'PYISO'
+import json, os, pathlib
+p = pathlib.Path(os.environ["MAIN_AGENT_CONFIG_DIR"]) / "settings.json"
+data = {}
+if p.exists():
+    try: data = json.loads(p.read_text())
+    except Exception: data = {}
+data["skipDangerousModePermissionPrompt"] = True
+p.parent.mkdir(parents=True, exist_ok=True)
+p.write_text(json.dumps(data, indent=2))
+try: os.chmod(p, 0o600)
+except Exception: pass
+# claude reads .claude.json from the config dir too -- seed onboarding so the TUI
+# never parks on the first-run login picker.
+c = pathlib.Path(os.environ["MAIN_AGENT_CONFIG_DIR"]) / ".claude.json"
+cd = {}
+if c.exists():
+    try: cd = json.loads(c.read_text())
+    except Exception: cd = {}
+cd["hasCompletedOnboarding"] = True
+c.write_text(json.dumps(cd, indent=2))
+PYISO
   ok "Fleet-local izolacio: sessions=${AGENT_SESSION_PREFIX}-agent-*, config=${MAIN_AGENT_CONFIG_DIR}"
 fi
 
