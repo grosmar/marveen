@@ -1251,7 +1251,7 @@ elif _go_version_ok; then
       chmod +x "$BUMBLEBEE_BIN"
       ok "bumblebee installed: $BUMBLEBEE_BIN"
     else
-      echo -e "  ${ORANGE}!${NC} bumblebee build sikertelen -- a supply-chain scan kihagyja a binart."
+      echo -e "  ${ORANGE}!${NC} bumblebee build failed -- the supply-chain scan will skip bumblebee."
       echo -e "  ${DIM}  Kezzel: cd /tmp/bb && go build -o ~/.local/bin/bumblebee ./cmd/bumblebee${NC}"
     fi
   else
