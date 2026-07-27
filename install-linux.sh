@@ -834,7 +834,7 @@ if [ -f "$INSTALL_DIR/templates/CLAUDE.md.template" ]; then
     "$INSTALL_DIR/templates/CLAUDE.md.template" >"$INSTALL_DIR/CLAUDE.md"
   ok "CLAUDE.md generalva"
 else
-  warn "CLAUDE.md.template nem talalhato, CLAUDE.md nem generalhato"
+  warn "CLAUDE.md.template not found, CLAUDE.md cannot be generated"
 fi
 
 # SOUL.md generalasa template-bol (personality definition for the main agent).
@@ -844,7 +844,7 @@ if [ -f "$INSTALL_DIR/templates/SOUL.md.template" ] && [ ! -f "$INSTALL_DIR/SOUL
       "$INSTALL_DIR/templates/SOUL.md.template" > "$INSTALL_DIR/SOUL.md"
   ok "SOUL.md generalva"
 elif [ ! -f "$INSTALL_DIR/templates/SOUL.md.template" ] && [ ! -f "$INSTALL_DIR/SOUL.md" ]; then
-  warn "SOUL.md.template nem talalhato, SOUL.md nem generalhato"
+  warn "SOUL.md.template not found, SOUL.md cannot be generated"
 fi
 
 # Default scheduled tasks scaffoldolasa ~/.claude/scheduled-tasks/ ala. A
@@ -1527,7 +1527,7 @@ sleep 3
 echo ""
 echo -e "${BOLD}$(_t section_checks)${NC}"
 if [ "$CHANNEL_PROVIDER" = "telegram" ] && ! command -v bun &>/dev/null; then
-  echo -e "  ${RED}✗${NC} Bun nem talalhato. A Telegram plugin nem fog mukodni."
+  echo -e "  ${RED}✗${NC} Bun not found. The Telegram plugin will not work."
   echo -e "  ${BOLD}Fix:${NC} curl -fsSL https://bun.sh/install | bash"
   echo -e "  ${DIM}Utana: source ~/.bashrc && ./scripts/start.sh${NC}"
 fi
@@ -1575,7 +1575,7 @@ if [ "$CHANNEL_PROVIDER" = "telegram" ] && [ -n "$BOT_TOKEN" ]; then
 
     if [ -n "$PAIR_CODE" ]; then
       if [ ! -f "$ACCESS_FILE" ]; then
-        warn "access.json nem talalhato: $ACCESS_FILE"
+        warn "access.json not found: $ACCESS_FILE"
         echo -e "  ${DIM}Bizonyosodj meg rola, hogy a bot futott amikor uzeneteket kuldtel neki.${NC}"
       else
         # PAIR_CODE env-en at adjuk at, hogy elkerüljük a shell injection-t
@@ -1612,7 +1612,7 @@ with open('$ACCESS_FILE', 'w') as f:
           systemctl --user restart "${CHAN_UNIT}" 2>/dev/null || true
           ok "${CHAN_UNIT} $(_t linux.chan_restarted)"
         else
-          warn "A kod nem talalhato az access.json pending bejegyzesei kozott."
+          warn "The code was not found among the pending entries in access.json."
           echo -e "  ${DIM}Lehetseges okok:${NC}"
           echo -e "  ${DIM}  - A bot meg nem kapta meg az uzeneteidet (varj par masodpercet)${NC}"
           echo -e "  ${DIM}  - Elgepeles a kodban${NC}"
@@ -1638,7 +1638,7 @@ if [ "$DO_MIGRATE" = "i" ] || [ "$DO_MIGRATE" = "y" ]; then
   if [ -f "$INSTALL_DIR/scripts/migrate.sh" ]; then
     "$INSTALL_DIR/scripts/migrate.sh"
   else
-    warn "A migrate.sh nem talalhato. Hasznald a dashboardot: http://localhost:${WEB_PORT:-3420} -> Koltoztes"
+    warn "migrate.sh not found. Use the dashboard: http://localhost:${WEB_PORT:-3420} -> Koltoztes"
   fi
 fi
 
