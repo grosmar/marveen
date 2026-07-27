@@ -261,6 +261,15 @@ if [ -n "$_node_bin" ] && [ -f "$INSTALL_DIR/dist/web/agent-process.js" ]; then
   if [ -n "$_cfg_line" ] && [ -d "$_cfg_dir" ]; then
     if [ "$_cfg_mode" = "explicit" ]; then
       CFG_ENV="export CLAUDE_CONFIG_DIR='$_cfg_dir' && "
+      # An explicit dir usually carries its OWN login (that is the point -- a separate
+      # identity for the main bot). But a freshly provisioned one (e.g. install
+      # --isolate) has no .credentials.json, and without a token the agent parks on
+      # the OAuth sign-in screen and the channel never attaches. Seed the fleet token
+      # ONLY when the dir has no credentials of its own, so a deliberate separate
+      # login is never overridden.
+      if [ ! -f "$_cfg_dir/.credentials.json" ] && [ -s "$INSTALL_DIR/store/.claude-oauth-token" ]; then
+        CFG_ENV="${CFG_ENV}export CLAUDE_CODE_OAUTH_TOKEN=\"\$(cat '$INSTALL_DIR/store/.claude-oauth-token')\" && "
+      fi
     else
       # Seed the token from the SAME 0600 file the isolated dir is gated on, so
       # the config dir and the active token always match (the isolated dir carries
