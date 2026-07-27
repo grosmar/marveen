@@ -98,9 +98,17 @@ while [[ $# -gt 0 ]]; do
         echo "Error: --port requires a numeric argument (e.g. --port 3421)" >&2; exit 1
       fi
       WEB_PORT="$2"; shift 2 ;;
+    --isolate)
+      FLEET_ISOLATE=1; shift ;;
     --help|-h)
-      echo "Usage: $0 [--port <N>]"
+      echo "Usage: $0 [--port <N>] [--isolate]"
       echo "  --port <N>   Dashboard port (default: 3420). Also settable via WEB_PORT env var."
+      echo "  --isolate    Install as an ADDITIONAL fleet on a host that already runs one:"
+      echo "               keeps tmux session names, the main-agent config dir, scheduled"
+      echo "               tasks and the channel credentials fleet-local instead of sharing"
+      echo "               \$HOME/.claude with the existing install. Individually overridable"
+      echo "               via AGENT_SESSION_PREFIX / MAIN_AGENT_CONFIG_DIR /"
+      echo "               SCHEDULED_TASKS_DIR / CHANNEL_STATE_DIR env vars."
       exit 0 ;;
     *) echo "Unknown option: $1 (use --help for usage)" >&2; exit 1 ;;
   esac
@@ -679,6 +687,21 @@ fi
 BRAND_NAME="$BOT_NAME"
 SERVICE_ID="$MAIN_AGENT_ID"
 
+# --- Multi-fleet isolation -------------------------------------------------
+# Several pieces of per-install state otherwise live under the SHARED $HOME/.claude:
+# tmux sub-agent session names (agent-<role>), the main agent's settings/hooks dir,
+# the scheduled-tasks dir, and -- most damagingly -- the channel credentials
+# ($HOME/.claude/channels/<provider>/{.env,access.json}). Installing a second fleet
+# without relocating those OVERWRITES the first fleet's bot token and access list.
+if [ "${FLEET_ISOLATE:-0}" = "1" ]; then
+  AGENT_SESSION_PREFIX="${AGENT_SESSION_PREFIX:-$MAIN_AGENT_ID}"
+  MAIN_AGENT_CONFIG_DIR="${MAIN_AGENT_CONFIG_DIR:-$INSTALL_DIR/.claude-main}"
+  SCHEDULED_TASKS_DIR="${SCHEDULED_TASKS_DIR:-$INSTALL_DIR/store/scheduled-tasks}"
+  CHANNEL_STATE_DIR="${CHANNEL_STATE_DIR:-$MAIN_AGENT_CONFIG_DIR/channels/$CHANNEL_PROVIDER}"
+  mkdir -p "$MAIN_AGENT_CONFIG_DIR" "$SCHEDULED_TASKS_DIR" "$CHANNEL_STATE_DIR"
+  ok "Fleet-local izolacio: sessions=${AGENT_SESSION_PREFIX}-agent-*, config=${MAIN_AGENT_CONFIG_DIR}"
+fi
+
 INSTALL_STEP="npm-install"
 # ─────────────────────────────────────────────
 # [5/7] Fuggosegek telepitese + konfiguracic
@@ -734,6 +757,10 @@ SERVICE_ID=${SERVICE_ID}
 WEB_PORT=${WEB_PORT:-3420}
 ENVEOF
 )
+for _iso in AGENT_SESSION_PREFIX MAIN_AGENT_CONFIG_DIR SCHEDULED_TASKS_DIR CHANNEL_STATE_DIR; do
+  [ -n "${!_iso:-}" ] && echo "${_iso}=${!_iso}" >> "$INSTALL_DIR/.env"
+done
+unset _iso
 if [ "$CHANNEL_PROVIDER" = "telegram" ]; then
   echo "TELEGRAM_BOT_TOKEN=${BOT_TOKEN}" >> "$INSTALL_DIR/.env"
   echo "ALLOWED_CHAT_ID=${CHAT_ID}" >> "$INSTALL_DIR/.env"
@@ -883,8 +910,20 @@ if [ -d "$SEED_CONFIG_DIR" ]; then
 fi
 
 # Channel state directory setup
-CHANNEL_DIR="$HOME/.claude/channels/$CHANNEL_PROVIDER"
+CHANNEL_DIR="${CHANNEL_STATE_DIR:-$HOME/.claude/channels/$CHANNEL_PROVIDER}"
 mkdir -p "$CHANNEL_DIR"
+# Refuse to overwrite a DIFFERENT install's channel credentials. Without this a
+# second install silently replaces the first fleet's bot token + access list, and
+# the running fleet goes deaf/locked-out on its next restart.
+if [ -f "$CHANNEL_DIR/.env" ] && [ -n "${BOT_TOKEN:-}" ] \
+   && ! grep -qF "$BOT_TOKEN" "$CHANNEL_DIR/.env" 2>/dev/null; then
+  warn "$CHANNEL_DIR/.env mar egy MAS bot tokenjet tartalmazza."
+  echo -e "  ${ORANGE}Ez egy masik Marveen telepites elo csatorna-allapota.${NC}"
+  echo -e "  ${ORANGE}Felulirasa azt a fleet-et megnemitja (a botja nem valaszol tobbe).${NC}"
+  echo -e "  ${DIM}Tobb fleet egy gepen: futtasd ujra --isolate flaggel (fleet-lokalis${NC}"
+  echo -e "  ${DIM}csatorna-allapot), vagy allitsd be a CHANNEL_STATE_DIR env vart.${NC}"
+  fail "channel-allapot utkozes -- megszakitva, hogy a meglevo fleet ne romoljon el."
+fi
 
 if [ "$CHANNEL_PROVIDER" = "telegram" ] && [ -n "$BOT_TOKEN" ]; then
   (umask 077 && echo "TELEGRAM_BOT_TOKEN=$BOT_TOKEN" >"$CHANNEL_DIR/.env")
@@ -1339,7 +1378,7 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=$INSTALL_DIR/scripts/host-restart-watchdog.sh
 Environment=MARVEEN_STORE=$INSTALL_DIR/store
-Environment=TELEGRAM_ENV=$HOME/.claude/channels/telegram/.env
+Environment=TELEGRAM_ENV=$CHANNEL_DIR/.env
 Environment=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=$HOME
 ${TZ_LINE}
@@ -1360,7 +1399,7 @@ Description=${BOT_NAME} app-crash notifier for %i
 [Service]
 Type=oneshot
 ExecStart=$INSTALL_DIR/scripts/unit-fail-notify.sh %i
-Environment=TELEGRAM_ENV=$HOME/.claude/channels/telegram/.env
+Environment=TELEGRAM_ENV=$CHANNEL_DIR/.env
 Environment=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=$HOME
 ${TZ_LINE}
