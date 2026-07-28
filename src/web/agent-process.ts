@@ -397,13 +397,33 @@ function provisionIsolatedConfigDir(
       const link = join(cfg, entry)
       let needsLink = true
       try {
-        if (lstatSync(link).isSymbolicLink()) needsLink = false
-        else rmSync(link, { recursive: true, force: true })
+        if (lstatSync(link).isSymbolicLink()) {
+          // A symlink was previously trusted unconditionally, so one whose target
+          // had since vanished (~/.claude/plans, statsig, todos, chrome are created
+          // lazily by Claude Code and can be cleaned away) persisted forever as a
+          // BROKEN link. existsSync() follows the link, so a later write through it
+          // fails ENOENT -- plan mode / todos silently break for that sub-agent.
+          // Re-link when the target is back; drop it when it is not.
+          needsLink = !existsSync(link)
+          if (needsLink) rmSync(link, { force: true })
+        } else rmSync(link, { recursive: true, force: true })
       } catch { /* absent -> create */ }
       if (needsLink) {
         try { symlinkSync(join(realClaude, entry), link) }
         catch (err) { logger.warn({ err, entry, name }, 'isolated-config: symlink failed') }
       }
+    }
+    // Reap ORPHANED broken links: the loop above only visits entries that still
+    // exist in ~/.claude, so a link whose target was deleted is never revisited and
+    // would never be cleaned up by the pass above.
+    for (const entry of readdirSync(cfg)) {
+      const link = join(cfg, entry)
+      try {
+        if (lstatSync(link).isSymbolicLink() && !existsSync(link)) {
+          rmSync(link, { force: true })
+          logger.debug({ entry, name }, 'isolated-config: reaped broken shared-config symlink')
+        }
+      } catch { /* raced away */ }
     }
 
     // 2. Own settings.json: copy the shared one (keeps hooks etc.) but force
