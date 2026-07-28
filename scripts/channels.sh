@@ -43,7 +43,12 @@ if [ -f "$INSTALL_DIR/.env" ]; then
   unset _api_key _oauth
 fi
 CHANNEL_PROVIDER="${CHANNEL_PROVIDER:-telegram}"
-SESSION="${MAIN_AGENT_ID:-marveen}-channels"
+# CHANNELS_SESSION lets an install pin the operator session name explicitly. ai-fleet's
+# add_cron and its README already treat it as the override, and the watchdogs receive it as
+# MARVEEN_SESSION -- without it being honoured HERE the two would disagree and every
+# send-keys would target a session that does not exist (all tmux calls are 2>/dev/null, so
+# the escalation would vanish silently).
+SESSION="${CHANNELS_SESSION:-${MAIN_AGENT_ID:-marveen}-channels}"
 
 # Resolve plugin ID from provider
 case "$CHANNEL_PROVIDER" in
