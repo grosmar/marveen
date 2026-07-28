@@ -288,6 +288,16 @@ if [ -n "$_node_bin" ] && [ -f "$INSTALL_DIR/dist/web/agent-process.js" ]; then
     # dir claude will actually read, not the shared $HOME one.
     _main_cfg_dir_resolved="$_cfg_dir"
   fi
+  # No config dir => no CFG_ENV => the token had to come from the tmux global env, which is
+  # exactly the path that vanished above. Seed it explicitly from the same 0600 file so the
+  # launch command is self-sufficient for EVERY install shape. $(cat) runs in the launched
+  # shell, so the secret never appears in argv/`ps`. Skipped when real file credentials
+  # exist (a deliberate interactive login must win) or when CFG_ENV already exports one.
+  if [ -z "$CFG_ENV" ] && [ -s "$INSTALL_DIR/store/.claude-oauth-token" ] \
+     && [ ! -f "${HOME}/.claude/.credentials.json" ]; then
+    CFG_ENV="export CLAUDE_CODE_OAUTH_TOKEN=\"\$(cat '$INSTALL_DIR/store/.claude-oauth-token')\" && "
+    echo "$(date '+%Y-%m-%d %H:%M:%S') channels.sh: seeded fleet token for non-isolated main agent (no file creds)" >> "$INSTALL_DIR/store/channels-failures.log"
+  fi
   unset _cfg_line _cfg_mode _cfg_dir
 fi
 unset _node_bin
@@ -428,7 +438,13 @@ fi
 # fleet) install keeps the original -g behaviour, so nothing changes for a default host.
 _iso_install=0
 _main_cfg_env="$(grep -E '^MAIN_AGENT_CONFIG_DIR=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "\"'" || true)"
-if [ -n "${MAIN_AGENT_CONFIG_DIR:-$_main_cfg_env}" ] || [ -n "${CHANNEL_STATE_DIR:-}" ]; then _iso_install=1; fi
+# Gate on CONFIG isolation ONLY. CHANNEL_STATE_DIR relocates channel state (bot token,
+# access.json) and says NOTHING about credentials -- but it used to flip this flag too, so
+# an install that set it for the shared-bot-token fix silently moved into the "clear the
+# global env" branch below. On an install with no MAIN_AGENT_CONFIG_DIR the launch command
+# builds no CFG_ENV, so the global env was its ONLY token path: the main agent then had no
+# credentials at all and every prompt returned "Not logged in - Please run /login".
+if [ -n "${MAIN_AGENT_CONFIG_DIR:-$_main_cfg_env}" ]; then _iso_install=1; fi
 if [ "$_iso_install" = "1" ]; then
   # Actively clear any value a sibling fleet published, so our sessions do not inherit it.
   $TMUX set-environment -g -u CLAUDE_CODE_OAUTH_TOKEN 2>/dev/null || true

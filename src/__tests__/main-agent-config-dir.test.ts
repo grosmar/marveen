@@ -75,12 +75,37 @@ describe('launcher wiring', () => {
     expect(HELPER).toMatch(/isolated\\t/)
   })
 
-  it('channels.sh never injects the fleet token for an explicit dir', () => {
-    // The explicit dir carries its OWN .credentials.json -- exporting the fleet
-    // token there would silently authenticate the bot as the fleet.
+  it('channels.sh injects the fleet token for an explicit dir ONLY when it has no creds of its own', () => {
+    // Original contract: an explicit dir carries its OWN .credentials.json, so exporting the
+    // fleet token would silently authenticate the bot AS THE FLEET.
+    // Refined since: a freshly provisioned explicit dir (install --isolate) has no
+    // credentials yet, and without a token the agent parks on the OAuth sign-in screen and
+    // the channel never attaches. The seed IS therefore allowed -- but ONLY behind an
+    // explicit "this dir has no .credentials.json" guard, which is what preserves the
+    // invariant. (This test asserted the absolute form and had been red ever since.)
     const explicitBranch = CHANNELS.match(/if \[ "\$_cfg_mode" = "explicit" \]; then\n([\s\S]*?)\n\s*else/)
     expect(explicitBranch).not.toBeNull()
-    expect(explicitBranch?.[1]).not.toMatch(/CLAUDE_CODE_OAUTH_TOKEN/)
-    expect(explicitBranch?.[1]).toMatch(/CLAUDE_CONFIG_DIR/)
+    const body = explicitBranch![1]
+    expect(body).toMatch(/CLAUDE_CONFIG_DIR/)
+    if (/CLAUDE_CODE_OAUTH_TOKEN/.test(body)) {
+      const guard = /\[ ! -f "\$_cfg_dir\/\.credentials\.json" \]/
+      expect(body).toMatch(guard)
+      expect(body.indexOf('CLAUDE_CODE_OAUTH_TOKEN')).toBeGreaterThan(body.search(guard))
+    }
+  })
+
+  it('credential publication keys on CONFIG isolation only, and the fallback never overrides a real login', () => {
+    // Regression guard (2026-07-29): CHANNEL_STATE_DIR used to flip the credential-
+    // publication gate too. An install with no MAIN_AGENT_CONFIG_DIR builds no CFG_ENV, so
+    // the tmux global env was its ONLY token path -- setting CHANNEL_STATE_DIR (for the
+    // shared-bot-token fix) silently cut it off and the main agent ran with NO credentials:
+    // every prompt returned "Not logged in - Please run /login". The launch command now
+    // seeds the token itself, but must never override a deliberate interactive login.
+    expect(CHANNELS).toMatch(/if \[ -n "\$\{MAIN_AGENT_CONFIG_DIR:-\$_main_cfg_env\}" \]; then _iso_install=1; fi/)
+    expect(CHANNELS).not.toMatch(/\|\| \[ -n "\$\{CHANNEL_STATE_DIR:-\}" \]; then _iso_install=1/)
+    const fb = CHANNELS.match(/if \[ -z "\$CFG_ENV" \][\s\S]*?\n  fi/)
+    expect(fb).not.toBeNull()
+    expect(fb![0]).toMatch(/\.claude-oauth-token/)
+    expect(fb![0]).toMatch(/! -f "\$\{HOME\}\/\.claude\/\.credentials\.json"/)
   })
 })
