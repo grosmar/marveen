@@ -20,9 +20,14 @@
 
 set -uo pipefail
 
-STATE_DIR="${MARVEEN_STORE:-$HOME/marveen/store}"
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# MULTI-FLEET: default to THIS install's store. "$HOME/marveen/store" is fleet #1's,
+# so a sibling fleet read AND WROTE fleet #1's .last-btime -- whichever ran first
+# consumed the boot event and the other never alerted on a host restart.
+STATE_DIR="${MARVEEN_STORE:-$INSTALL_DIR/store}"
 STATE_FILE="$STATE_DIR/.last-btime"
-ENV_FILE="${TELEGRAM_ENV:-$HOME/.claude/channels/telegram/.env}"
+. "$(dirname "${BASH_SOURCE[0]}")/lib-channel-state.sh"
+ENV_FILE="${TELEGRAM_ENV:-$CHANNEL_ENV_FILE}"
 # Alert target chat-id -- MUST come from the install's own config; there is
 # deliberately NO hardcoded fallback (a hardcoded id would make every downstream
 # install send its host-stability alerts to that one private chat).

@@ -13,7 +13,8 @@ fi
 VOICE_ARG="${1:?usage: tts.sh <voice> <chat_id> <text...>}"; shift
 CHAT_ID="${1:?missing chat_id}"; shift
 TEXT="$*"
-STATE_DIR="${VOICE_STATE_DIR:-$HOME/.claude/channels/telegram}"
+. "$(dirname "${BASH_SOURCE[0]}")/../lib-channel-state.sh"
+STATE_DIR="${VOICE_STATE_DIR:-$CHANNEL_STATE_DIR}"
 case "$VOICE_ARG" in
   imre)  ONNX="$DEST/voices/hu_HU-imre-medium.onnx" ;;
   anna)  ONNX="$DEST/voices/hu_HU-anna-medium.onnx" ;;

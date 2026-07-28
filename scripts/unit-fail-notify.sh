@@ -12,7 +12,8 @@
 set -uo pipefail
 
 UNIT="${1:-unknown.unit}"
-ENV_FILE="${TELEGRAM_ENV:-$HOME/.claude/channels/telegram/.env}"
+. "$(dirname "${BASH_SOURCE[0]}")/lib-channel-state.sh"
+ENV_FILE="${TELEGRAM_ENV:-$CHANNEL_ENV_FILE}"
 # Alert target chat-id -- MUST be provided by the install's own config; there is
 # deliberately NO hardcoded fallback (a hardcoded id would make every downstream
 # install send its alerts to that one private chat via its own bot token).

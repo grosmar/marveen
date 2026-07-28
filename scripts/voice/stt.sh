@@ -11,5 +11,6 @@ if [[ -f "$SCRIPT_DIR/_vtools.py" ]]; then
   DEST="$SCRIPT_DIR"
 fi
 FID="${1:?usage: stt.sh <file_id> [state_dir]}"
-STATE_DIR="${2:-$HOME/.claude/channels/telegram}"
+. "$(dirname "${BASH_SOURCE[0]}")/../lib-channel-state.sh"
+STATE_DIR="${2:-$CHANNEL_STATE_DIR}"
 exec "$DEST/venv/bin/python" "$DEST/_vtools.py" transcribe "$FID" "$STATE_DIR"

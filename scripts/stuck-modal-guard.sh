@@ -43,7 +43,8 @@ FIRSTSEEN_STAMP="$STORE/.stuck-modal-firstseen"
 RESPAWN_STAMP="$STORE/.channel-last-respawn"           # SHARED with channel-watchdog.sh
 RESPAWN_COUNT_FILE="$STORE/.stuck-modal-respawns"
 BACKOFF_STAMP="$STORE/.stuck-modal-backoff-alerted"
-TG_ENV="$HOME/.claude/channels/telegram/.env"
+. "$(dirname "${BASH_SOURCE[0]}")/lib-channel-state.sh"
+TG_ENV="${TELEGRAM_ENV:-$CHANNEL_ENV_FILE}"
 LOG_TAG="stuck-modal-guard"
 
 STUCK_SECONDS="${STUCK_MODAL_SECONDS:-120}"   # must stay stuck this long before acting

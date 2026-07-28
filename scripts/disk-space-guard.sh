@@ -52,7 +52,8 @@ INSTALL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRATCH_DIR="${DISK_GUARD_SCRATCH_DIR:-/tmp}"
 STATE_DIR="${DISK_GUARD_STATE_DIR:-$INSTALL_DIR/store}"
 ALERT_STAMP="$STATE_DIR/.disk-guard-alerted"
-TG_ENV="$HOME/.claude/channels/telegram/.env"
+. "$(dirname "${BASH_SOURCE[0]}")/lib-channel-state.sh"
+TG_ENV="${TELEGRAM_ENV:-$CHANNEL_ENV_FILE}"
 LOG_TAG="disk-space-guard"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [$LOG_TAG] $*" || true; }

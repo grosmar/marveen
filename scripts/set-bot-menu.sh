@@ -15,8 +15,9 @@ if [ "$CHANNEL_PROVIDER" != "telegram" ]; then
 fi
 
 # Load bot token
-if [ -f "$HOME/.claude/channels/telegram/.env" ]; then
-  BOT_TOKEN=$(grep TELEGRAM_BOT_TOKEN "$HOME/.claude/channels/telegram/.env" | cut -d= -f2)
+. "$(dirname "${BASH_SOURCE[0]}")/lib-channel-state.sh"
+if [ -f "$CHANNEL_ENV_FILE" ]; then
+  BOT_TOKEN=$(grep TELEGRAM_BOT_TOKEN "$CHANNEL_ENV_FILE" | cut -d= -f2)
 elif [ -f "$INSTALL_DIR/.env" ]; then
   BOT_TOKEN=$(grep TELEGRAM_BOT_TOKEN "$INSTALL_DIR/.env" | cut -d= -f2)
 fi
