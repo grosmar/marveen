@@ -43,12 +43,12 @@ if [ -f "$INSTALL_DIR/.env" ]; then
   unset _api_key _oauth
 fi
 CHANNEL_PROVIDER="${CHANNEL_PROVIDER:-telegram}"
-# CHANNELS_SESSION lets an install pin the operator session name explicitly. ai-fleet's
-# add_cron and its README already treat it as the override, and the watchdogs receive it as
-# MARVEEN_SESSION -- without it being honoured HERE the two would disagree and every
-# send-keys would target a session that does not exist (all tmux calls are 2>/dev/null, so
-# the escalation would vanish silently).
-SESSION="${CHANNELS_SESSION:-${MAIN_AGENT_ID:-marveen}-channels}"
+# The operator session name derives from MAIN_AGENT_ID and NOTHING ELSE. An earlier attempt
+# added a CHANNELS_SESSION override here, but channel-keepalive-probe.sh, channel-watchdog.sh,
+# doctor.sh, monitor_agents.sh, verify-channels-health.sh, notify.sh and stop.sh all derive it
+# from MAIN_AGENT_ID with no override -- so honouring it only here would create a session this
+# fleet's own watchdogs could not find, i.e. a restart loop. One mechanism, one name.
+SESSION="${MAIN_AGENT_ID:-marveen}-channels"
 
 # Resolve plugin ID from provider
 case "$CHANNEL_PROVIDER" in
@@ -299,6 +299,11 @@ unset _node_bin
 # plugin offers an explicit override, so export it when this install opts in via CHANNEL_STATE_DIR
 # in .env. Unset -> nothing exported == upstream behaviour.
 _chan_state="$(grep -E '^CHANNEL_STATE_DIR=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "\"'")"
+# Publish under the canonical name: later consumers (the bot.pid liveness path and the
+# isolated-install test) read $CHANNEL_STATE_DIR, and without this they silently saw an
+# empty value -- the liveness check then watched $HOME/.claude/... which does not exist
+# for a relocated fleet, and the isolation test was dead code.
+CHANNEL_STATE_DIR="${CHANNEL_STATE_DIR:-$_chan_state}"
 if [ -n "$_chan_state" ]; then
   mkdir -p "$_chan_state" 2>/dev/null || true
   case "$CHANNEL_PROVIDER" in
@@ -385,14 +390,18 @@ fi
 # is named `subdir` (not `sub`) because `sub` is a reserved awk function name and
 # BSD/macOS awk syntax-errors on it.
 #
+# NOTE the trailing "/" in the mydir test: one install path can be a strict PREFIX of
+# another (/home/u/marveen vs /home/u/marveen-mini-games), so a bare substring test made
+# the shorter install claim the longer one's processes -- the very bug this guard exists
+# to prevent, just in the other direction.
 # MULTI-FLEET: the exclusion above is "not MY sub-agents", which on a host running more
 # than one install means "every OTHER install's pollers too" -- this pass was SIGKILLing
 # the sibling fleet's live Telegram poller on every channels restart. So also require the
-# process to be OURS (index($0, mydir) > 0). Trade-off: a stale main orphan from an old
+# process to be OURS (index($0, mydir "/") > 0). Trade-off: a stale main orphan from an old
 # build whose env no longer mentions INSTALL_DIR survives this pass (the 409-conflict
 # handling and the next restart still catch it) -- far better than killing a live poller
 # that belongs to another fleet.
-ORPHAN_PIDS2="$(/bin/ps eww -e 2>/dev/null | awk -v needle="CLAUDE_PLUGIN_ROOT=" -v prov="/${CHANNEL_PROVIDER}" -v mydir="${INSTALL_DIR}" -v subdir="${INSTALL_DIR}/agents/" '$0 ~ needle && $0 ~ prov && index($0, mydir) > 0 && index($0, subdir) == 0 { print $1 }')"
+ORPHAN_PIDS2="$(/bin/ps eww -e 2>/dev/null | awk -v needle="CLAUDE_PLUGIN_ROOT=" -v prov="/${CHANNEL_PROVIDER}" -v mydir="${INSTALL_DIR}" -v subdir="${INSTALL_DIR}/agents/" '$0 ~ needle && $0 ~ prov && index($0, mydir "/") > 0 && index($0, subdir) == 0 { print $1 }')"
 if [ -n "$ORPHAN_PIDS2" ]; then
   # shellcheck disable=SC2086
   /bin/kill -TERM $ORPHAN_PIDS2 2>/dev/null || true
@@ -418,7 +427,8 @@ fi
 # already exports the token into each session it creates. Only a non-isolated (single-
 # fleet) install keeps the original -g behaviour, so nothing changes for a default host.
 _iso_install=0
-[ -n "${MAIN_AGENT_CONFIG_DIR:-}" ] || [ -n "${CHANNEL_STATE_DIR:-}" ] && _iso_install=1
+_main_cfg_env="$(grep -E '^MAIN_AGENT_CONFIG_DIR=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "\"'" || true)"
+if [ -n "${MAIN_AGENT_CONFIG_DIR:-$_main_cfg_env}" ] || [ -n "${CHANNEL_STATE_DIR:-}" ]; then _iso_install=1; fi
 if [ "$_iso_install" = "1" ]; then
   # Actively clear any value a sibling fleet published, so our sessions do not inherit it.
   $TMUX set-environment -g -u CLAUDE_CODE_OAUTH_TOKEN 2>/dev/null || true
@@ -678,7 +688,9 @@ while $TMUX has-session -t "$SESSION" 2>/dev/null; do
   # orphan-reaper above uses). Without this the watchdog false-restarts every
   # ~10 min on plugin versions that don't emit a bot.pid.
   if [ "$_plugin_alive" != "true" ]; then
-    if /bin/ps eww -e 2>/dev/null | grep -qE "CLAUDE_PLUGIN_ROOT=[^ ]*/${CHANNEL_PROVIDER}(/|@| |$)"; then
+    # Scope to THIS install: unscoped, any sibling fleet's live poller marked us alive, so a
+  # fleet could never detect its own dead plugin.
+  if /bin/ps eww -e 2>/dev/null | grep -F "${INSTALL_DIR}/" | grep -qE "CLAUDE_PLUGIN_ROOT=[^ ]*/${CHANNEL_PROVIDER}(/|@| |$)"; then
       _plugin_alive=true
     fi
   fi
