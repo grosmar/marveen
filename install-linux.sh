@@ -1399,7 +1399,9 @@ Description=${BOT_NAME} Reggeli Napindito Timer
 Requires=${MORN_UNIT}.service
 
 [Timer]
-OnCalendar=*-*-* 07:27:00
+# NOTE: OnCalendar is resolved in the systemd MANAGER timezone, which is often UTC even
+# when the service sets TZ= -- so the timezone is stated explicitly here (systemd >= 240).
+OnCalendar=*-*-* 07:27:00 ${APP_TZ:-Europe/Budapest}
 Persistent=true
 
 [Install]

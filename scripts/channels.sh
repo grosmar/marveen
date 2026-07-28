@@ -379,7 +379,15 @@ fi
 # an install path with regex metacharacters can't break the exclusion. The var
 # is named `subdir` (not `sub`) because `sub` is a reserved awk function name and
 # BSD/macOS awk syntax-errors on it.
-ORPHAN_PIDS2="$(/bin/ps eww -e 2>/dev/null | awk -v needle="CLAUDE_PLUGIN_ROOT=" -v prov="/${CHANNEL_PROVIDER}" -v subdir="${INSTALL_DIR}/agents/" '$0 ~ needle && $0 ~ prov && index($0, subdir) == 0 { print $1 }')"
+#
+# MULTI-FLEET: the exclusion above is "not MY sub-agents", which on a host running more
+# than one install means "every OTHER install's pollers too" -- this pass was SIGKILLing
+# the sibling fleet's live Telegram poller on every channels restart. So also require the
+# process to be OURS (index($0, mydir) > 0). Trade-off: a stale main orphan from an old
+# build whose env no longer mentions INSTALL_DIR survives this pass (the 409-conflict
+# handling and the next restart still catch it) -- far better than killing a live poller
+# that belongs to another fleet.
+ORPHAN_PIDS2="$(/bin/ps eww -e 2>/dev/null | awk -v needle="CLAUDE_PLUGIN_ROOT=" -v prov="/${CHANNEL_PROVIDER}" -v mydir="${INSTALL_DIR}" -v subdir="${INSTALL_DIR}/agents/" '$0 ~ needle && $0 ~ prov && index($0, mydir) > 0 && index($0, subdir) == 0 { print $1 }')"
 if [ -n "$ORPHAN_PIDS2" ]; then
   # shellcheck disable=SC2086
   /bin/kill -TERM $ORPHAN_PIDS2 2>/dev/null || true
@@ -398,11 +406,25 @@ fi
 # which DO conflict and are -u'd). `|| true` tolerates "no server yet" -- in that
 # case new-session creates the server from this shell's exported env, which is
 # already correct.
-if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-  $TMUX set-environment -g CLAUDE_CODE_OAUTH_TOKEN "$CLAUDE_CODE_OAUTH_TOKEN" 2>/dev/null || true
-fi
-if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-  $TMUX set-environment -g ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY" 2>/dev/null || true
+# MULTI-FLEET: "-g" is the tmux SERVER's global env, and there is ONE server per Unix
+# user -- so the LAST fleet to restart overwrote the credential every other fleet's
+# newly-created sessions inherit. When this install is isolated (its own
+# MAIN_AGENT_CONFIG_DIR / CHANNEL_STATE_DIR) publish nothing globally: the launch command
+# already exports the token into each session it creates. Only a non-isolated (single-
+# fleet) install keeps the original -g behaviour, so nothing changes for a default host.
+_iso_install=0
+[ -n "${MAIN_AGENT_CONFIG_DIR:-}" ] || [ -n "${CHANNEL_STATE_DIR:-}" ] && _iso_install=1
+if [ "$_iso_install" = "1" ]; then
+  # Actively clear any value a sibling fleet published, so our sessions do not inherit it.
+  $TMUX set-environment -g -u CLAUDE_CODE_OAUTH_TOKEN 2>/dev/null || true
+  $TMUX set-environment -g -u ANTHROPIC_API_KEY 2>/dev/null || true
+else
+  if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+    $TMUX set-environment -g CLAUDE_CODE_OAUTH_TOKEN "$CLAUDE_CODE_OAUTH_TOKEN" 2>/dev/null || true
+  fi
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    $TMUX set-environment -g ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY" 2>/dev/null || true
+  fi
 fi
 # Propagate the prompt-suggestion disable to every sub-agent tmux session.
 $TMUX set-environment -g CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION false 2>/dev/null || true
@@ -617,7 +639,10 @@ START_TS=$(date +%s)
 # dashboard couldn't -- avoids double-restart races. bot.pid lives at the
 # main-agent channelStateDir(): ~/.claude/channels/<provider>/bot.pid (HOME-,
 # not INSTALL_DIR-relative; see src/channel-provider.ts channelStateDir()).
-MAIN_BOT_PID_FILE="$HOME/.claude/channels/$CHANNEL_PROVIDER/bot.pid"
+# MULTI-FLEET: honour CHANNEL_STATE_DIR. Hardcoding $HOME meant an isolated fleet's
+# self-healing watchdog monitored the FIRST fleet's bot.pid -- so it never noticed its
+# own dead plugin, and could act on a sibling's state.
+MAIN_BOT_PID_FILE="${CHANNEL_STATE_DIR:-$HOME/.claude/channels/$CHANNEL_PROVIDER}/bot.pid"
 # Never-started budget: generous so a slow cold-start (WSL first-run, MCP
 # handshake + /mcp unlock retries) is never killed prematurely. The plugin
 # normally writes bot.pid within ~1-2 min; 10 min is a safe ceiling.
