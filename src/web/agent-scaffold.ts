@@ -5,6 +5,7 @@ import { PROJECT_ROOT, OWNER_NAME, MAIN_AGENT_ID, BOT_NAME, CHANNEL_PROVIDER, WE
 import { channelStateDir } from '../channel-provider.js'
 import { runAgent } from '../agent.js'
 import { atomicWriteFileSync } from './atomic-write.js'
+import { SCHEDULED_TASKS_DIR } from './scheduled-tasks-io.js'
 import { agentDir, agentConfigRoot, listAgentNames, readAgentCapabilities } from './agent-config.js'
 import { resolveProfilePlaceholders, type ProfileTemplate } from './profiles.js'
 import { sanitizeCapabilityTag, CAPABILITY_TAG_MAX_PER_AGENT } from '../prompt-safety.js'
@@ -489,7 +490,12 @@ function copyTaskConfigWithAgentRewrite(srcPath: string, destPath: string): void
 export function ensureDefaultScheduledTasks(): void {
   const repoTasks = join(PROJECT_ROOT, 'scheduled-tasks')
   if (!existsSync(repoTasks)) return
-  const destRoot = join(homedir(), '.claude', 'scheduled-tasks')
+  // Seed into THIS install's scheduled-tasks dir. This was hardcoded to the shared
+  // ~/.claude/scheduled-tasks, so every install on a host seeded the SAME dir: a second
+  // fleet wrote tasks into the first fleet's scheduler, and the first fleet accumulated
+  // duplicate seeds of tasks it already had under different names (observed: two enabled
+  // pairs on identical schedules, double-firing the morning kickoff and the heartbeat).
+  const destRoot = SCHEDULED_TASKS_DIR
   mkdirSync(destRoot, { recursive: true })
 
   for (const taskName of readdirSync(repoTasks)) {
