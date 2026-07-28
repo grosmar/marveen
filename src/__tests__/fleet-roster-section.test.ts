@@ -15,6 +15,10 @@ vi.mock('../config.js', () => ({
   WEB_PORT: 3420,
   OWNER_DRIVE_FOLDER: '',
   DASHBOARD_PUBLIC_URL: '',
+  // Added when B3 introduced the per-install scheduled-tasks dir: scheduled-tasks-io.ts
+  // reads it at module load, so a config mock without it makes this whole FILE fail to
+  // collect (0 tests run, which reads as 'no tests' rather than 'tests broken').
+  SCHEDULED_TASKS_DIR_OVERRIDE: '',
 }))
 
 vi.mock('../web/agent-config.js', () => ({

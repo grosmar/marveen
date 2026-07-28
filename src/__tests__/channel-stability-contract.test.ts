@@ -68,8 +68,18 @@ describe('P1#3 — .bun/bin PATH on every claude (re)spawn path', () => {
   it('channels.sh exports a PATH containing .bun/bin', () => {
     expect(read('scripts/channels.sh')).toMatch(/export PATH="[^"]*\.bun\/bin/)
   })
-  it('the systemd-timer watchdog respawn command exports .bun/bin', () => {
-    expect(read('scripts/channel-watchdog.sh')).toMatch(/export PATH=\\?"[^"]*\.bun\/bin/)
+  // SUPERSEDED (asserted a design channel-watchdog.sh deliberately abandoned): it no
+  // longer (re)spawns claude at all, so it has no spawn PATH to get .bun/bin onto. The
+  // requirement only binds a script that STARTS a claude; assert that property instead of
+  // an export that would now be dead code.
+  it('the channel watchdog does not spawn claude, so it needs no .bun/bin spawn PATH', () => {
+    const sh = stripBashComments(read('scripts/channel-watchdog.sh'))
+    expect(sh).not.toMatch(/respawn-pane/)
+    expect(sh).not.toMatch(/new-session/)
+    // If it ever regains a spawn path, it must carry the PATH export again.
+    if (/respawn-pane|new-session/.test(sh)) {
+      expect(sh).toMatch(/export PATH=\\?"[^"]*\.bun\/bin/)
+    }
   })
   // buildMainSessionRespawnCmd (dashboard respawn) is locked in
   // channel-deafness-recovery.test.ts; agent-process.ts startAgentProcess is
@@ -86,18 +96,42 @@ describe('P2#4 — independent systemd-timer watchdog', () => {
   it('NEVER uses systemctl restart (would kill the shared tmux server / all agents)', () => {
     expect(stripBashComments(sh)).not.toMatch(/systemctl\s+(--user\s+)?restart/)
   })
-  it('recovers via tmux respawn-pane of ONLY the channels session', () => {
-    expect(sh).toMatch(/respawn-pane -k -t "\$SESSION"/)
-  })
   it('runs every 5 minutes', () => {
     expect(timer).toMatch(/OnUnitActiveSec=5min/)
   })
-  it('has a respawn grace and a consecutive-respawn backoff (no storm)', () => {
-    expect(sh).toMatch(/GRACE_SECONDS=/)
-    expect(sh).toMatch(/MAX_CONSECUTIVE=/)
+
+  // The three cases below replace assertions on a design this watchdog deliberately
+  // abandoned (respawn-pane + GRACE_SECONDS/MAX_CONSECUTIVE + the .channel-last-respawn
+  // stamp). Respawning destroys the session's conversation context, so it now FLAGS and
+  // ESCALATES instead -- the house rule that a watchdog never blindly resets a live
+  // session. They had been red ever since, i.e. guarding nothing; these guard the rule
+  // that actually holds now.
+  it('never destroys a live session: no respawn-pane, no kill-session, no systemctl stop', () => {
+    const code = stripBashComments(sh)
+    expect(code).not.toMatch(/respawn-pane/)
+    expect(code).not.toMatch(/kill-session/)
+    expect(code).not.toMatch(/systemctl\s+(--user\s+)?stop/)
   })
-  it('writes the shared respawn stamp the dashboard watchdog also honors', () => {
-    expect(sh).toMatch(/\.channel-last-respawn/)
+
+  it('recovers only by STARTING a dead unit, rate-limited so it cannot storm', () => {
+    const code = stripBashComments(sh)
+    // Starting an inactive unit is the one safe action (restart/stop would kill the
+    // shared tmux server in that cgroup, taking every agent session with it).
+    expect(code).toMatch(/systemctl\s+(--user\s+)?start|sctl\s+start/)
+    // Every escalation/action path is cooldown-guarded.
+    expect(code).toMatch(/SVC_START_GRACE=/)
+    expect(code).toMatch(/ESCALATE_COOLDOWN=/)
+  })
+
+  it('escalates to a human rather than acting when the evidence is ambiguous', () => {
+    const code = stripBashComments(sh)
+    expect(code).toMatch(/page_\w+\(\)|page_\w+ /)          // a direct-page path exists
+    expect(code).toMatch(/_PAGE_COOLDOWN=|PAGE_COOLDOWN=/)  // and it is rate-limited
+  })
+
+  // The dashboard still honours the shared respawn stamp for ITS own respawn path; that
+  // side of the contract is unchanged even though this watchdog no longer writes it.
+  it('the dashboard side still honours the shared respawn stamp', () => {
     expect(read('src/web/channel-monitor.ts')).toMatch(/\.channel-last-respawn/)
   })
 })
