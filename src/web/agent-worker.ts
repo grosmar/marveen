@@ -86,17 +86,20 @@ export function makeWorkerCtx(session: string, homeDir: string): WorkerCtx {
 // Slow session: long-running tasks (analysis, reports, search). The original
 // worker -- all existing callers default to this. Session name keys off
 // MAIN_AGENT_ID (per #611) so notify.sh's "${MAIN_AGENT_ID}-worker" branch
-// matches on renamed installs; default installs stay "marveen-worker". The
-// WORKER_DIR stays fixed (.marveen-worker) -- the config-dir hash depends on it.
+// matches on renamed installs; default installs stay "marveen-worker". The WORKER_DIR
+// keys off MAIN_AGENT_ID for the SAME reason: pinned to ~/.marveen-worker, every install
+// on a host shared ONE worker cwd and ONE CLAUDE_CONFIG_DIR, so two fleets' workers wrote
+// the same history.jsonl/.claude.json concurrently. A default install is unchanged
+// (MAIN_AGENT_ID "marveen" -> ~/.marveen-worker, so the config-dir hash is stable).
 const ctxSlow = makeWorkerCtx(
   process.env.MARVEEN_WORKER_SESSION || `${MAIN_AGENT_ID}-worker`,
-  process.env.MARVEEN_WORKER_DIR || join(homedir(), '.marveen-worker'),
+  process.env.MARVEEN_WORKER_DIR || join(homedir(), `.${MAIN_AGENT_ID}-worker`),
 )
 // Fast session: short, conversational tasks (< 300 chars, no analysis keywords).
 // Separate home + config dir eliminates any shared state with the slow session.
 const ctxFast = makeWorkerCtx(
   process.env.MARVEEN_WORKER_SESSION_FAST || `${MAIN_AGENT_ID}-worker-fast`,
-  process.env.MARVEEN_WORKER_DIR_FAST || join(homedir(), '.marveen-worker-fast'),
+  process.env.MARVEEN_WORKER_DIR_FAST || join(homedir(), `.${MAIN_AGENT_ID}-worker-fast`),
 )
 
 // --- Message priority routing -------------------------------------------------

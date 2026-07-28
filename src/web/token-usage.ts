@@ -32,9 +32,19 @@ function discoverAgentSources(): AgentTranscriptSource[] {
     try { stat = statSync(full) } catch { continue }
     if (!stat.isDirectory()) continue
 
-    const agentMatch = entry.match(/-agents-([a-z]+)$/)
-    if (agentMatch) {
-      sources.push({ agent: agentMatch[1], projectDir: full })
+    // ANCHOR to THIS install. The projects dir is shared across every install on the
+    // host, and a bare /-agents-(...)$/ claimed any of them -- so each fleet's dashboard
+    // reported the other's spend (observed: 450 of 451 cursors in one fleet's DB pointed
+    // at the other's transcripts). Only a dir whose encoded path is <thisRoot>-agents-<x>
+    // belongs to us. Note this is prefix-safe: an install at /home/u/marveen-mini-games
+    // encodes to `<...>-marveen-mini-games-agents-x`, which does NOT start with
+    // `<...>-marveen-agents-`.
+    const agentPrefix = `${mainDirName}-agents-`
+    if (entry.startsWith(agentPrefix)) {
+      const agentName = entry.slice(agentPrefix.length)
+      if (/^[a-z0-9][a-z0-9_-]*$/.test(agentName)) {
+        sources.push({ agent: agentName, projectDir: full })
+      }
     } else if (entry === mainDirName) {
       sources.push({ agent: MAIN_AGENT_ID, projectDir: full })
     }
