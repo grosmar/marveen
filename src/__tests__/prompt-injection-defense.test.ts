@@ -316,7 +316,11 @@ describe('/api/messages from-authentication', () => {
   })
 
   it('calls isKnownAgent with the sanitized from field', () => {
-    expect(src).toMatch(/isKnownAgent\(\s*sanitizeAgentIdent\(from\)\s*\)/)
+    // `from` must never reach isKnownAgent unsanitized -- directly or via a
+    // variable that was assigned something other than sanitizeAgentIdent(from).
+    expect(src).toMatch(/const\s+sanitizedFrom\s*=\s*sanitizeAgentIdent\(from\)/)
+    expect(src).toMatch(/isKnownAgent\(\s*(?:sanitizeAgentIdent\(from\)|sanitizedFrom)\s*\)/)
+    expect(src).not.toMatch(/isKnownAgent\(\s*from(?:\.trim\(\))?\s*\)/)
   })
 
   it('rejects unknown agents with 403', () => {
@@ -339,7 +343,27 @@ describe('/api/messages from-authentication', () => {
     // normalization the router uses for CHANNEL_COORDINATOR_AGENTS.has(). Using
     // a different normalizer (e.g. trim()) would create an asymmetry a bypass
     // could exploit.
-    expect(src).toContain('isKnownAgent(sanitizeAgentIdent(from))')
+    expect(src).toMatch(/sanitizedFrom\s*=\s*sanitizeAgentIdent\(from\)/)
+    expect(src).toMatch(/isKnownAgent\(sanitizedFrom\)/)
+  })
+
+  // The watchdogs/healers escalate through this endpoint under their own name, so a
+  // bounded system-sender class is accepted alongside registered agents (40 real
+  // escalations were silently 403'd before it existed). It must stay BOUNDED: an
+  // arbitrary name, and above all the reserved coordinator id, must not slip through.
+  it('accepts only a bounded system-sender name class, never the coordinator id', () => {
+    const m = src.match(/const isSystemSender = (\/\^.*?\/)\.test\(/)
+    expect(m).not.toBeNull()
+    const re = new RegExp(m![1].slice(1, -1))
+    for (const ok of ['dashboard-dist-drift-watchdog', 'reauth-healer', 'cron-guard', 'pgrep-selfmatch-reaper']) {
+      expect(re.test(ok)).toBe(true)
+    }
+    for (const bad of ['telegram-coordinator', 'zack', 'watchdog', 'evil', 'attacker-watchdogx']) {
+      expect(re.test(bad)).toBe(false)
+    }
+    // The coordinator guard must still run BEFORE the system-sender bypass, so a
+    // "-monitor"-shaped coordinator id can never reach the accept path.
+    expect(src.indexOf('forging channel-coordinator id')).toBeLessThan(src.indexOf('const isSystemSender'))
   })
 })
 

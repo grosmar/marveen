@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest'
+import { dirname, join } from 'node:path'
 import {
   getProvider,
   getProviderType,
   getChannelToken,
   getChannelChatId,
   channelStateDir,
+  resolveMainChannelBase,
   type ChannelProviderType,
 } from '../channel-provider.js'
 
@@ -73,19 +75,53 @@ describe('getChannelChatId', () => {
 })
 
 describe('channelStateDir', () => {
+  // The last segment is the provider; the BASE above it is install-dependent
+  // (legacy ~/.claude/channels, or the parent of CHANNEL_STATE_DIR on an isolated
+  // install -- e.g. ".claude-channels", whose own name contains "channels").
   it('uses telegram subdirectory for telegram', () => {
-    const dir = channelStateDir('telegram')
-    expect(dir).toMatch(/\.claude\/channels\/telegram$/)
+    expect(channelStateDir('telegram')).toMatch(/\/telegram$/)
   })
 
   it('uses slack subdirectory for slack', () => {
-    const dir = channelStateDir('slack')
-    expect(dir).toMatch(/\.claude\/channels\/slack$/)
+    expect(channelStateDir('slack')).toMatch(/\/slack$/)
+  })
+
+  it('puts every provider under one shared base', () => {
+    expect(dirname(channelStateDir('telegram'))).toBe(dirname(channelStateDir('slack')))
   })
 
   it('uses agent dir when provided', () => {
     const dir = channelStateDir('telegram', '/tmp/agents/test-agent')
     expect(dir).toBe('/tmp/agents/test-agent/.claude/channels/telegram')
+  })
+
+  // MULTI-FLEET (B5): the main agent's channel state must follow CHANNEL_STATE_DIR.
+  // While the dashboard resolved homedir() unconditionally, two fleets shared ONE
+  // ~/.claude/channels/<provider> and each one's dashboard atomically overwrote the
+  // other's access.json / invites.json / bot-token .env. Asserted on the pure
+  // resolver so BOTH branches are reachable -- an isolated install's own .env sets
+  // the override, which would otherwise hide the unset case.
+  describe('resolveMainChannelBase', () => {
+    it('unset override keeps the legacy shared ~/.claude/channels', () => {
+      expect(resolveMainChannelBase('', '/home/u')).toBe('/home/u/.claude/channels')
+    })
+
+    it('takes the PARENT of the provider dir, so other providers get their own subdir', () => {
+      const base = resolveMainChannelBase('/home/u/fleet2/.claude-main/channels/telegram', '/home/u')
+      expect(base).toBe('/home/u/fleet2/.claude-main/channels')
+      expect(join(base, 'slack')).toBe('/home/u/fleet2/.claude-main/channels/slack')
+    })
+
+    it('expands a leading ~', () => {
+      expect(resolveMainChannelBase('~/f2/.claude-main/channels/telegram', '/home/u'))
+        .toBe('/home/u/f2/.claude-main/channels')
+    })
+
+    it('two fleets never resolve to the same base', () => {
+      const a = resolveMainChannelBase('/home/u/marveen/.claude-channels/telegram', '/home/u')
+      const b = resolveMainChannelBase('/home/u/marveen-mini-games/.claude-main/channels/telegram', '/home/u')
+      expect(a).not.toBe(b)
+    })
   })
 })
 

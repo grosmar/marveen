@@ -64,7 +64,20 @@ export async function tryHandleMessages(ctx: RouteContext): Promise<boolean> {
     // filesystem (agents/<id>/ directory, or MAIN_AGENT_ID). This is not
     // impersonation-proof between fleet agents (they share the same token) but
     // it closes the "unknown sender" injection path without per-agent secrets.
-    if (!isKnownAgent(sanitizeAgentIdent(from))) {
+    // SYSTEM SENDERS (2026-07-28): the fleet's watchdogs/healers escalate through
+    // this endpoint with their OWN name as `from` ("dashboard-dist-drift-watchdog",
+    // "reauth-healer", ...) so the operator can see WHICH probe fired. None of them
+    // is an agents/<id>/ dir, so isKnownAgent rejected every one: 40 escalations --
+    // 36 of them the dist-drift watchdog -- were silently 403'd, i.e. the entire
+    // watchdog alerting path was dead while each script logged a successful curl.
+    // Accept a BOUNDED name class instead. This grants no new capability: these are
+    // local scripts that already hold the dashboard bearer token, and the reserved
+    // channel-coordinator id + slash-qualified federation ids are rejected ABOVE
+    // this point, so a system sender can neither forge channel-inbound framing nor
+    // pose as a federation peer -- it can only be seen as the probe it names.
+    const sanitizedFrom = sanitizeAgentIdent(from)
+    const isSystemSender = /^[a-z0-9]+(?:-[a-z0-9]+)*-(?:watchdog|healer|guard|reaper|probe|monitor)$/.test(sanitizedFrom)
+    if (!isSystemSender && !isKnownAgent(sanitizedFrom)) {
       logger.warn({ from: from.trim(), to: to.trim() }, 'Rejected /api/messages POST from unregistered agent')
       json(res, { error: `unknown agent '${from.trim()}' -- from must be a registered fleet agent id` }, 403)
       return true

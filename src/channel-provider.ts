@@ -1,7 +1,8 @@
 import https from 'node:https'
 import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
+import { readEnvFile } from './env.js'
 import { logger } from './logger.js'
 import { formatForTelegram, splitMessage } from './format.js'
 
@@ -493,10 +494,39 @@ export function getProviderType(envValue: string | undefined): ChannelProviderTy
   return 'telegram'
 }
 
+// Per-install MAIN-agent channel state (B5). scripts/channels.sh already exports
+// CHANNEL_STATE_DIR as the plugin's TELEGRAM_STATE_DIR at launch, but the dashboard's
+// OWN reads/writes resolved homedir() unconditionally -- so both fleets' dashboards
+// read and ATOMICALLY WROTE one shared ~/.claude/channels/<provider>: access.json,
+// invites.json, approved/<id> and the bot-token .env. A pairing approval or token save
+// in fleet #2's dashboard silently overwrote fleet #1's live credentials, last writer
+// wins. Read from the install's .env (NOT process.env: the units set no EnvironmentFile)
+// via env.js -- importing config.js here would be a cycle, config already imports this.
+// UNSET => byte-identical legacy ~/.claude/channels.
+// Pure, so BOTH branches stay testable: on an isolated install the developer's own
+// .env sets CHANNEL_STATE_DIR, which would otherwise make the unset case unreachable
+// from a unit test.
+//
+// CHANNEL_STATE_DIR names the PROVIDER dir (".../channels/telegram") -- that is how
+// channels.sh consumes it (TELEGRAM_STATE_DIR, MAIN_BOT_PID_FILE). Take its parent as
+// the base so a non-default provider still gets its own subdir instead of silently
+// sharing the telegram one.
+export function resolveMainChannelBase(override: string, home: string): string {
+  if (!override) return join(home, '.claude', 'channels')
+  const abs = override.startsWith('~') ? join(home, override.slice(1)) : override
+  return dirname(abs)
+}
+
+const CHANNEL_STATE_DIR_OVERRIDE = (() => {
+  try {
+    return readEnvFile(['CHANNEL_STATE_DIR'])['CHANNEL_STATE_DIR'] ?? ''
+  } catch { return '' }
+})()
+
 export function channelStateDir(provider: ChannelProviderType, agentDir?: string): string {
   const base = agentDir
     ? join(agentDir, '.claude', 'channels')
-    : join(homedir(), '.claude', 'channels')
+    : resolveMainChannelBase(CHANNEL_STATE_DIR_OVERRIDE, homedir())
   const subdir =
     provider === 'slack' ? 'slack'
     : provider === 'discord' ? 'discord'
