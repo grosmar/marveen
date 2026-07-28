@@ -847,12 +847,16 @@ elif [ ! -f "$INSTALL_DIR/templates/SOUL.md.template" ] && [ ! -f "$INSTALL_DIR/
   warn "SOUL.md.template not found, SOUL.md cannot be generated"
 fi
 
-# Default scheduled tasks scaffoldolasa ~/.claude/scheduled-tasks/ ala. A
-# template-ek {{MAIN_AGENT_ID}} placeholdert hasznalnak, igy a felhasznalo
-# valasztott agent slugja kerul be a hardcoded "marveen" helyett. Letezo task
-# konyvtarakat soha nem irjuk felul.
+# Scaffold the default scheduled tasks. Templates use a {{MAIN_AGENT_ID}} placeholder
+# so the operator-chosen agent slug is substituted for the hardcoded "marveen".
+# Existing task directories are never overwritten.
 SCHED_TPL_DIR="$INSTALL_DIR/templates/scheduled-tasks"
-SCHED_TARGET_DIR="$HOME/.claude/scheduled-tasks"
+# Honour the per-install scheduled-tasks dir (--isolate / SCHEDULED_TASKS_DIR). Seeding
+# into the shared $HOME/.claude/scheduled-tasks put a SECOND fleet's tasks in the FIRST
+# fleet's scheduler: same-named tasks (auto-update) were overwritten so fleet #1 would
+# have run fleet #2's update, and tasks addressed to an agent that does not exist in
+# fleet #1 (agent=<other slug>) were left behind for it to trip over.
+SCHED_TARGET_DIR="${SCHEDULED_TASKS_DIR:-$HOME/.claude/scheduled-tasks}"
 if [ -d "$SCHED_TPL_DIR" ]; then
   mkdir -p "$SCHED_TARGET_DIR"
   for tpl in "$SCHED_TPL_DIR"/*/; do
@@ -876,7 +880,7 @@ if [ -d "$SCHED_TPL_DIR" ]; then
   done
 fi
 
-# Seed scheduled tasks: from seed-scheduled-tasks/ into ~/.claude/scheduled-tasks/
+# Seed scheduled tasks: from seed-scheduled-tasks/ into $SCHED_TARGET_DIR
 # Idempotent: skip directories that already exist. Templates use {{MAIN_AGENT_ID}},
 # {{BOT_NAME}}, {{OWNER_NAME}}, {{INSTALL_DIR}} placeholders.
 SEED_SCHED_DIR="$INSTALL_DIR/seed-scheduled-tasks"
