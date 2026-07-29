@@ -92,3 +92,6 @@ __pycache__/
 # Claude Code Channels runtime config/session dir (sessions, history, tokens,
 # plugins, skills). Per-install runtime state -- never source, never commit.
 .channels-config/
+
+# Runtime channel state (bot token, access.json, inbox images) — never commit
+.claude-channels/
