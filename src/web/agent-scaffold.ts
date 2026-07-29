@@ -949,6 +949,10 @@ Generate a personality definition that includes:
 - Unique quirks or characteristics
 - What it should avoid
 
+IMPORTANT FORMATTING RULES:
+- Write ALL Hungarian text with proper accents (á, é, í, ó, ö, ő, ú, ü, ű). NEVER write Hungarian without accents.
+- Never use em dash (—), only simple hyphen (-).
+
 Make the personality distinctive but professional.
 Output ONLY the markdown content, no code fences.`
 
@@ -982,6 +986,10 @@ Generate a SKILL.md with this structure:
    - ## Examples - 1-2 concrete examples with Input/Output
    - ## Language rules - Hungarian with ${OWNER_NAME} (the user), English for code/technical
    - ## What to avoid - common pitfalls
+
+IMPORTANT FORMATTING RULES:
+- Write ALL Hungarian text with proper accents (á, é, í, ó, ö, ő, ú, ü, ű). NEVER write Hungarian without accents.
+- Never use em dash (—), only simple hyphen (-).
 
 Keep the body under 200 lines. Be specific and actionable. The owner's name is ${OWNER_NAME}; use only this name when referring to the user.
 Output ONLY the markdown content, no code fences.`

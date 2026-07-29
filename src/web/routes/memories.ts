@@ -1,12 +1,12 @@
 import {
   saveAgentMemory, getAgentMemories, searchAgentMemories, getMemoryStats, updateMemory,
   hybridSearch, backfillEmbeddings, clearMemoryCache,
-  searchMemories, getMemoriesForChat, getDb,
+  searchMemories, getMemoriesForChat, getDb, touchMemoriesAccessed,
   type Memory,
 } from '../../db.js'
 import { MAIN_AGENT_ID, ALLOWED_CHAT_ID, OLLAMA_URL, APP_TZ } from '../../config.js'
 import { logger } from '../../logger.js'
-import { readBody, json } from '../http-helpers.js'
+import { readBody, json, jsonMaybeGzip } from '../http-helpers.js'
 import type { RouteContext } from './types.js'
 
 // Canonical memory categories. Kept in sync with the DB CHECK constraint in
@@ -114,12 +114,23 @@ export async function tryHandleMemories(ctx: RouteContext): Promise<boolean> {
         results = db2.prepare('SELECT * FROM memories WHERE content LIKE ? ORDER BY accessed_at DESC LIMIT ?').all(`%${q}%`, limit) as Memory[]
       }
     } else if (agentId) {
-      results = getAgentMemories(agentId, limit)
+      // Category goes into the query, not a post-filter: see getAgentMemories.
+      results = getAgentMemories(agentId, limit, tier || undefined)
     } else {
       results = getMemoriesForChat(ALLOWED_CHAT_ID, limit)
     }
 
+    // Still needed for the search branches above, which rank by relevance and
+    // cannot push the category down into their own LIMIT. A no-op for the
+    // plain agent listing, which already filtered in SQL.
     if (tier) results = results.filter(m => m.category === tier)
+
+    // A search query (q) is a genuine recall: stamp the surfaced memories as
+    // just-accessed so accessed_at reflects real usage. Plain listing (no q,
+    // e.g. the dashboard browsing all memories) is NOT a recall and must not
+    // refresh accessed_at -- otherwise every poll would keep everything "fresh"
+    // and defeat staleness detection.
+    if (q && results.length) touchMemoriesAccessed(results.map(m => m.id))
 
     const formatted = results.map(m => ({
       ...m,
@@ -127,7 +138,7 @@ export async function tryHandleMemories(ctx: RouteContext): Promise<boolean> {
       created_label: new Date(m.created_at * 1000).toLocaleString('hu-HU', { timeZone: APP_TZ }),
       accessed_label: new Date(m.accessed_at * 1000).toLocaleString('hu-HU', { timeZone: APP_TZ }),
     }))
-    json(res, formatted)
+    jsonMaybeGzip(req, res, formatted)
     return true
   }
 
