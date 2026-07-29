@@ -1,5 +1,5 @@
 import { execFileSync, execFile } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdtempSync, rmSync, lstatSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -254,12 +254,31 @@ const badFleetTokenPath = () => FLEET_OAUTH_TOKEN_PATH + '.bad'
 export function quarantineFleetToken(reasonLabel: string): boolean {
   try {
     if (!existsSync(FLEET_OAUTH_TOKEN_PATH)) return false
+    // MULTI-FLEET BLAST RADIUS: several installs under one Unix user may deliberately
+    // SHARE one identity -- either by symlinking this path at a sibling's file, or by
+    // hard-linking. renameSync moves a symlink itself (harmless to the target), but
+    // renaming the REAL file leaves every sharer's symlink DANGLING, so a sibling fleet
+    // goes auth-dead with nothing in its own logs to explain it. Quarantine is still the
+    // right local action -- a dead token must stop poisoning launches -- but say so, so
+    // the sibling outage is diagnosable instead of a mystery.
+    let shared = ''
+    try {
+      const st = lstatSync(FLEET_OAUTH_TOKEN_PATH)
+      if (st.isSymbolicLink()) {
+        shared = `this path is a SYMLINK -> ${realpathSync(FLEET_OAUTH_TOKEN_PATH)}; only THIS install loses the token (the shared file is untouched)`
+      } else if (st.nlink > 1) {
+        shared = `this file has ${st.nlink} hard links -- other installs share it and will lose auth too`
+      }
+    } catch { /* best effort: never block the quarantine on a stat */ }
     renameSync(FLEET_OAUTH_TOKEN_PATH, badFleetTokenPath())
     try { rmSync(VERIFIED_STAMP, { force: true }) } catch { /* best effort */ }
     logger.error(
-      { to: badFleetTokenPath(), reason: reasonLabel },
+      { to: badFleetTokenPath(), reason: reasonLabel, sharing: shared || 'sole owner' },
       'credentials-guard: QUARANTINED the fleet token (dead on live probe); newly launched agents fall back to shared-file auth. Restore with mv if this was a false positive.',
     )
+    if (shared) {
+      logger.error({ sharing: shared }, 'credentials-guard: the quarantined token was SHARED -- check every other fleet on this host for auth death')
+    }
     return true
   } catch (err) {
     logger.warn({ err }, 'credentials-guard: fleet-token quarantine failed')
