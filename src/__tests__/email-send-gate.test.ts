@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 // @ts-expect-error -- plain .mjs hook script, no types
-import { gateDecision } from '../../scripts/email-send-gate.mjs'
+import { gateDecision, commandSkeleton } from '../../scripts/email-send-gate.mjs'
 import { injectEmailSendGate, agentGetsEmailGate } from '../web/agent-scaffold.js'
 import { MAIN_AGENT_ID } from '../config.js'
 
@@ -45,6 +45,70 @@ describe('gateDecision', () => {
     expect(bash('curl -s http://localhost:3420/api/messages').deny).toBe(false)
     // mentioning "resend" without an email/send verb nearby is not gated
     expect(bash('grep resend src/foo.ts').deny).toBe(false)
+  })
+
+  // 2026-07-31: the security agent's inter-agent findings report on
+  // /api/subscribe was denied as "outbound email" because reviewing a
+  // subscription endpoint necessarily says `resend` and `sendEmail`. The
+  // payload is DATA on its way to the internal bus, never a command.
+  it('does not gate an inter-agent bus POST whose PAYLOAD merely discusses email', () => {
+    const bash = (command: string) => gateDecision('Bash', { command })
+    const body = JSON.stringify({
+      from: 'security',
+      to: 'po',
+      content:
+        '[SECURITY] /api/subscribe review. The endpoint uses Resend as the provider and ' +
+        'returns an identical 200 for an already-subscribed address, preventing enumeration. ' +
+        'No resend of the confirmation email fires on a duplicate, so there is no message ' +
+        'amplification path. sendEmail() is never reached without a validated address.',
+    })
+    expect(bash(`curl -s -X POST http://localhost:3420/api/messages -d '${body}'`).deny).toBe(false)
+    expect(bash(`curl -s -X POST http://localhost:3420/api/messages --json '${body}'`).deny).toBe(false)
+    // the same prose in a double-quoted payload with nothing expandable in it
+    expect(bash('curl -X POST http://localhost:3420/api/messages -d "a resend of the email"').deny).toBe(false)
+  })
+
+  // The stripping must never become a bypass. Each of these carries an inert
+  // payload AND a real send, and the real send is what the gate must see.
+  it('still blocks a real send that hides behind an inert payload', () => {
+    const bash = (command: string) => gateDecision('Bash', { command })
+    // the target URL survives stripping
+    expect(bash(`curl -X POST https://api.resend.com/emails -d '{"to":"a@b.c"}'`).deny).toBe(true)
+    // the executable name survives stripping
+    expect(bash(`swaks --data 'Subject: hi' --to a@b.c`).deny).toBe(true)
+    expect(bash(`python3 scripts/support-mail/send.py --data '{"x":1}'`).deny).toBe(true)
+    // a payload that CAN expand is not inert, so it is scanned in full
+    expect(bash(`curl -X POST http://localhost:3420/api/messages -d "$(cat mail | sendmail a@b.c)"`).deny).toBe(true)
+    expect(bash('curl -X POST http://localhost:3420/api/messages -d "`swaks --to a@b.c`"').deny).toBe(true)
+    // a command chained after the bus POST is still in the skeleton
+    expect(bash(`curl -X POST http://localhost:3420/api/messages -d '{"a":1}' ; sendmail a@b.c`).deny).toBe(true)
+    // -d is only treated as a data flag for HTTP clients, so this is not stripped
+    expect(bash(`runner -d 'scripts/support-mail/send.py'`).deny).toBe(true)
+    // single quotes that are NOT a data-flag payload are left alone (they execute)
+    expect(bash(`bash -c 'python3 scripts/support-mail/send.py --to a@b.c'`).deny).toBe(true)
+  })
+})
+
+// The skeleton itself, independent of the pattern set.
+describe('commandSkeleton', () => {
+  it('replaces inert data-flag payloads and keeps everything else', () => {
+    expect(commandSkeleton(`curl -d '{"a":1}' https://x.test/y`)).toBe('curl -d PAYLOAD https://x.test/y')
+    expect(commandSkeleton(`curl --data "plain text" https://x.test/y`)).toBe('curl --data PAYLOAD https://x.test/y')
+  })
+
+  it('leaves an expandable payload in place (it can execute)', () => {
+    const cmd = 'curl -d "$(whoami)" https://x.test/y'
+    expect(commandSkeleton(cmd)).toBe(cmd)
+  })
+
+  it('leaves -d alone when the command is not an HTTP client', () => {
+    const cmd = `docker run -d 'sendmail'`
+    expect(commandSkeleton(cmd)).toBe(cmd)
+  })
+
+  it('leaves -d @file alone (there is no literal payload to strip)', () => {
+    const cmd = 'curl -d @body.json https://x.test/y'
+    expect(commandSkeleton(cmd)).toBe(cmd)
   })
 })
 
