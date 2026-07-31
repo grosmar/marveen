@@ -30,6 +30,28 @@ POST /api/messages   { "from": "<agent>", "to": "<agent>", "content": "..." }
 GET  /api/messages?agent=<agent>      # státusz
 ```
 
+A `GET` **szigorú**: amelyik query-paramétert nem ismeri, arra `400`-at ad az
+elfogadott listával — nem hallgatja el. (2026-07-31-ig csendben eldobta őket,
+és a hívó a szűkebb találatot teljes körű auditnak jelentette.)
+
+| paraméter | jelentés |
+|---|---|
+| `agent` | beszélgetés (from **vagy** to), legújabb elöl |
+| `to` / `from` | egyirányú szűrés címzettre / feladóra |
+| `status` | `pending` esetén a **teljes** sor, limit nélkül (a router és a mélység-watchdogok az igazi sort kérik, nem egy oldalát) |
+| `limit` | alapértelmezés 50, plafon **200** |
+| `before` | kizárólagos felső id-korlát (visszafelé lapozás) |
+| `since_id` | kizárólagos **alsó** id-korlát, `id ASC` — ez az előrelapozó kurzor: küldd vissza az utolsó kapott id-t a következő oldalért |
+
+Válasz-fejlécek, hogy a csonkolás látszódjon: `X-Result-Count`,
+`X-Result-Limit`, `X-Result-Truncated`, `X-Result-Order`, és plafonra futáskor
+`X-Result-Limit-Clamped: <kért>-><plafon>`.
+
+> **Sor-forenzika:** mielőtt hiányt jelentesz ("nincs ilyen üzenet"), győződj
+> meg róla, hogy a lekérdezett halmaz *tartalmazhatta* volna. A `since_id`
+> kurzorral végigjárható tetszőleges id-tartomány; a `X-Result-Truncated: true`
+> azt jelenti, hogy van még.
+
 A rendszer az üzenetet a célpont ügynök tmux-session-jébe juttatja (`[Uzenet @<felado>-tol]: ...` formátumban), aki feldolgozza és a saját csatornáján válaszol. Csak futó (tmux-session-nel rendelkező) ügynöknek lehet üzenni. Távoli ügynöknél ez azt jelenti, hogy az ssh-kapcsolat és a laptop tmux-szervere elérhető kell legyen a delivery-loop ciklusában; ha nem az, az üzenet a sorban marad és visszakapcsoláskor kézbesül (lásd [Távoli ügynökök](#-távoli-remote-ügynökök)).
 
 A címzett lehet egy **másik Marveen-rendszer ügynöke** is, rendszer-minősített névvel (`to: "teodor/backend-dev"`) — ilyenkor az üzenet HTTPS-en át a társrendszer inboxába kerül. Részletek: [Föderáció](federation.md).
