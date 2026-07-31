@@ -3,7 +3,21 @@
 # Interactive installer for Linux (Ubuntu/Debian)
 
 set -e
-[ "${DEBUG:-0}" = "1" ] && set -x
+# A `set -x` a KIFEJTES UTANI parancsot naplozza, igy minden credential nyersen
+# megjelenik a trace-ben - nem csak a prompt kozeleben (ensure_in_rc), hanem tavol
+# is (.claude-oauth-token :894, a channel .env :1037/:1056/:1072). Merve: 6 talalat,
+# ebbol 2 a prompt-blokkon KIVUL, ezert a blokk korbevedese nem eleg.
+# A DEBUG-ot altalaban sikertelen telepiteskor kapcsoljak be - pont akkor, amikor a
+# kimenetet bemasoljak egy issue-ba vagy screen share-be. A trace megmarad, csak nem
+# a beillesztheto kimenetbe megy, hanem egy 600-as fajlba. Egy pont, minden regiora.
+if [ "${DEBUG:-0}" = "1" ]; then
+  _XTRACE_LOG="${TMPDIR:-/tmp}/marveen-install-trace.$$.log"
+  ( umask 077 && : >"$_XTRACE_LOG" )
+  exec 9>>"$_XTRACE_LOG"
+  BASH_XTRACEFD=9   # SOHA ne exportald: a gyerekfolyamatoknak nincs 9-es fd-je
+  set -x
+  printf '%s\n' "  ! DEBUG trace -> $_XTRACE_LOG (credentialt tartalmaz, ne oszd meg)" >&2
+fi
 
 # Ha a terminal tipusa ismeretlen (pl. xterm-ghostty), visszaesunk xterm-256color-ra
 if ! tput longname &>/dev/null 2>&1; then
