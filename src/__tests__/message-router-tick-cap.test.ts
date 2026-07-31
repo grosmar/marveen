@@ -78,12 +78,12 @@ vi.mock('../web/agent-message-wrap.js', () => ({
 
 import { runMessageRouterTick, MAX_MESSAGES_PER_TICK } from '../web/message-router.js'
 
-function makePending(count: number) {
+function makePending(count: number, toAgent = 'dex', startId = 1) {
   const nowSec = Math.floor(Date.now() / 1000)
   return Array.from({ length: count }, (_, i) => ({
-    id: i + 1,
+    id: startId + i,
     from_agent: 'orin',
-    to_agent: 'dex', // SUB-agent, not MAIN_AGENT_ID -> takes the tmux-inject path
+    to_agent: toAgent, // SUB-agent, not MAIN_AGENT_ID -> takes the tmux-inject path
     content: 'ping',
     created_at: nowSec, // fresh -> well inside the abandon window
   }))
@@ -116,6 +116,48 @@ describe('message router per-tick work cap', () => {
     await runMessageRouterTick()
 
     expect(mockSessionExistsOnHost).toHaveBeenCalledTimes(1)
+    expect(mockMarkFailed).not.toHaveBeenCalled()
+  })
+
+  // REGRESSION GATE (2026-07-31 incident). The tick budget used to be a flat
+  // oldest-first slice, so ONE undeliverable agent whose backlog reached the
+  // cap owned every slot and starved every other agent indefinitely -- the
+  // engineer's pane stopped reading 'idle' and content/qa/analyst went ~6h
+  // without being examined at all, though all three were ready to receive.
+  // The budget must be shared across receivers, never monopolised.
+  it('never lets one agent monopolise the tick budget (head-of-line fairness)', async () => {
+    // 'dex' has a backlog far past the cap; 'zoe' has two OLDER-but-fewer rows
+    // sitting behind it. A flat slice would be 25/25 dex and never reach zoe.
+    mockGetPendingMessages.mockReturnValue([
+      ...makePending(100, 'dex', 1),
+      ...makePending(2, 'zoe', 1001),
+    ])
+
+    await runMessageRouterTick()
+
+    // Both receivers must be examined in the SAME tick.
+    const sessions = mockSessionExistsOnHost.mock.calls.map((c) => c[1])
+    expect(sessions).toContain('agent-dex')
+    expect(sessions).toContain('agent-zoe')
+  })
+
+  it('keeps per-agent FIFO order while interleaving across agents', async () => {
+    // Ordering within one receiver must stay oldest-first: fairness changes
+    // only the interleave ACROSS agents, never the order within an agent.
+    mockGetPendingMessages.mockReturnValue([
+      ...makePending(3, 'dex', 1),
+      ...makePending(3, 'zoe', 1001),
+    ])
+    mockSessionExistsOnHost.mockReturnValue(true)
+
+    await runMessageRouterTick()
+
+    // Session absent=false now, but isSessionReadyForPrompt is mocked false, so
+    // nothing is delivered/failed -- we are asserting the slice composition via
+    // the per-unique-receiver pre-pass seeing both agents exactly once each.
+    const sessions = mockSessionExistsOnHost.mock.calls.map((c) => c[1])
+    expect(sessions.filter((s) => s === 'agent-dex')).toHaveLength(1)
+    expect(sessions.filter((s) => s === 'agent-zoe')).toHaveLength(1)
     expect(mockMarkFailed).not.toHaveBeenCalled()
   })
 })

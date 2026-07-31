@@ -846,7 +846,13 @@ function startRemoteAgentProcess(
   const cmd = buildRemoteLaunchCommand({ workdir, model, continue: hasPriorSession })
 
   try {
-    runTmux(host, ['new-session', '-d', '-s', session, cmd], { timeout: 10000 })
+    // -x/-y: a detached tmux session defaults to 80x24. At 24 rows a tall TUI
+    // widget (e.g. an 8-item task list) pushes the `bypass permissions` footer
+    // out of the capture, and that line is the ONLY thing IDLE_FOOTER_RX
+    // matches -- detectPaneState then reads 'unknown', isSessionReadyForPrompt
+    // stays false, and the agent silently stops receiving messages forever
+    // (2026-07-31 incident). Give the TUI room so the footer always renders.
+    runTmux(host, ['new-session', '-d', '-s', session, '-x', '200', '-y', '50', cmd], { timeout: 10000 })
     logger.info({ name, session, host, workdir }, 'Remote agent tmux session started')
     // Fire-and-forget: scheduleIdentitySetup only schedules delayed timers and
     // resolves immediately; startRemoteAgentProcess stays synchronous (out of scope).
@@ -1255,7 +1261,10 @@ export function startAgentProcess(name: string, opts: { fresh?: boolean } = {}):
     // skills symlinked into .claude/skills, plugin/role MCP merged into .mcp.json),
     // which Claude Code auto-loads from cwd -- so NO --add-dir/--mcp-config graft here.
     const cmd = `export PATH="/opt/homebrew/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin:$PATH" && ${unsetTokens} && ${promptSuggestionEnv}${mcpEnv}${channelSetup}${apiKeyEnv}${claudeConfigEnv}${oauthTokenEnv}${ollamaEnv}${deepseekEnv}${openrouterEnv}cd "${dir}" && ${claudeBin()} ${continueFlag}${skipFlag}--model '${model}' ${channelFlag}`.trimEnd()
-    runTmux(null, ['new-session', '-d', '-s', session, cmd], { timeout: 10000 })
+    // -x/-y: see the remote-launch site above. 80x24 is too short for the TUI
+    // to keep its idle footer on screen once a task-list widget appears, and a
+    // missing footer makes the pane permanently undeliverable (2026-07-31).
+    runTmux(null, ['new-session', '-d', '-s', session, '-x', '200', '-y', '50', cmd], { timeout: 10000 })
 
     logger.info({ name, session, channelDir: agentChannelDir }, 'Agent tmux session started')
 

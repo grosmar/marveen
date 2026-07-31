@@ -374,7 +374,41 @@ export async function runMessageRouterTick(): Promise<void> {
     const localPending: AgentMessage[] = []
     const federatedPending: AgentMessage[] = []
     for (const m of allPending) (isQualifiedId(m.to_agent) ? federatedPending : localPending).push(m)
-    const pending = localPending.slice(0, MAX_MESSAGES_PER_TICK)
+    // FAIRNESS: round-robin the per-tick budget across receivers instead of
+    // taking a flat oldest-first slice. A flat slice lets ONE undeliverable
+    // agent own every slot and starve everyone behind it -- head-of-line
+    // blockage of the whole fleet, from a single stuck pane.
+    //
+    // 2026-07-31 incident: the engineer's TUI grew an 8-item task-list widget,
+    // which in a 24-row pane pushed the `bypass permissions` line (the only
+    // thing IDLE_FOOTER_RX matches) out of the capture. detectPaneState then
+    // read 'unknown', isSessionReadyForPrompt stayed false, and its backlog
+    // passed 25 at ~01:07Z. From that moment the flat slice was 25/25 engineer
+    // rows every 5s tick, so content, qa and analyst -- all confirmed 'idle'
+    // and deliverable -- were never even examined for ~6h. Four agents looked
+    // like four independent stalls; it was one stuck receiver plus this line.
+    //
+    // Per-agent order stays strictly FIFO (round r takes each agent's r-th
+    // oldest); only the interleave ACROSS agents changes. Map preserves
+    // insertion order, so agents are visited oldest-message-first and nothing
+    // is starved. One wedged receiver can now cost at most its own share.
+    const byAgent = new Map<string, AgentMessage[]>()
+    for (const m of localPending) {
+      const q = byAgent.get(m.to_agent)
+      if (q) q.push(m)
+      else byAgent.set(m.to_agent, [m])
+    }
+    const pending: AgentMessage[] = []
+    outer: for (let round = 0; ; round++) {
+      let addedThisRound = false
+      for (const q of byAgent.values()) {
+        if (round >= q.length) continue
+        pending.push(q[round])
+        addedThisRound = true
+        if (pending.length >= MAX_MESSAGES_PER_TICK) break outer
+      }
+      if (!addedThisRound) break
+    }
     const now = Date.now()
     // ---- update absent/present tracking for all receivers in this tick ----
     // Rebuild the stuck-detector's view of which agents are absent RIGHT NOW.
