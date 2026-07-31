@@ -48,6 +48,15 @@ while read -r unit; do
   if systemctl --user restart "$unit" 2>/dev/null; then
     echo "postbuild: restarted $unit so it loads the build just produced"
     restarted=1
+    # Record it as DELIBERATE. A restart here is a new pid, which is byte-identical at the observation layer
+    # to the 18min-flap that dashboard-restart-rate-watchdog.sh exists to catch — so without this marker an
+    # evening of shipping dashboard commits pages the main agent as a fault. It did exactly that on
+    # 2026-07-31, seven builds in, before this line existed. The watchdog matches each churn event against a
+    # marker within a few minutes and counts only the leftovers, so a genuine flap interleaved with a build
+    # still fires. Same TZ as the watchdog's ts(), or the two logs cannot be compared.
+    printf '%s RELOAD unit=%s entry=%s\n' \
+      "$(TZ="${SCHEDULER_TZ:-Europe/Budapest}" date '+%Y-%m-%d %H:%M:%S')" "$unit" "$ENTRY" \
+      >> "$REPO/store/dashboard-deliberate-reload.log" 2>/dev/null || true
   else
     echo "postbuild: WARNING could not restart $unit; it is still running the PREVIOUS dist" >&2
   fi
