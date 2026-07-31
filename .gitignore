@@ -16,6 +16,19 @@ reports/
 !.claude/settings.json
 .config/
 
+# Fleet-internal docs. This repo is PUBLIC. docs/ itself is tracked, so these
+# sit as an untracked subdirectory of a tracked tree -- one `git add -A` and
+# zubi's pending-decision backlog (pending-zubi.md) and the fleet's failure
+# catalogue publish to GitHub. Operationally live (CLAUDE.md reads them on
+# demand); never source, never commit. Backup lives outside the repo.
+docs/marveen/
+
+# Local convenience symlink -> /home/zubi/ai-fleet (the shared multi-fleet core,
+# its own repo at gitlab.com/oxyness/ai-fleet). Absolute, host-specific, and
+# referenced by nothing in this repo. Committing it would store a path that is
+# meaningless on any other machine.
+/common
+
 # Database
 *.db
 *.db-shm
