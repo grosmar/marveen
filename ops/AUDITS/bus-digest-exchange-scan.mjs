@@ -135,11 +135,72 @@ if (confirmed.length === 0) console.log('  none')
 for (const s of confirmed) console.log(`  msg ${s.id}  ${s.from} -> ${s.to}  ${s.mixed} tokens`)
 
 // The vocabulary matcher must be shown live, or sweep 2's shortness reads as cleanliness when it
-// could just be a dead regex. Tonight the fleet DISCUSSED this mechanism at length, so the
-// vocabulary alone should hit many messages that carry no token list at all.
+// could just be a dead regex.
+//
+// AND THE CONTROL IS WEAKER THAN IT LOOKS, which I only saw by reading its hits. "digest" is an
+// ORDINARY FLEET WORD -- msg 14 is "LUMORA STRATEGY REVIEW DIGEST", meaning a summary, and the
+// fleet has used it that way since the first day. So a large count here demonstrates the regex is
+// alive in the ENGLISH sense and says almost nothing about the CRYPTOGRAPHIC sense, which is the
+// one sweep 2 relies on. Reporting the raw number as "the matcher is live" overstates it.
 const vocabOnly = rows.filter((r) => DIGEST_VOCAB.test(String(r.content ?? '')))
-console.log(`\nVOCAB MATCHER LIVE? ${vocabOnly.length} messages mention digests at all (discussion + exchange)`)
-console.log(`  of those, ${confirmed.length} also carry a token list -- the rest are talk, which is the expected shape`)
+const cryptoVocab = rows.filter((r) => /sha-?256|hmac|preimage|salted/i.test(String(r.content ?? '')))
+console.log(`\nVOCAB MATCHER LIVE? ${vocabOnly.length} messages match -- but see the note: "digest" is an ordinary fleet word`)
+console.log(`  narrowed to unambiguously cryptographic terms: ${cryptoVocab.length} messages`)
+console.log(`  of those, ${confirmed.length} also carry a token list`)
+
+// ---- 3b. THE CONTROL THAT DECIDES WHETHER THE ZERO IS WORTH ANYTHING --------------------------
+// Content (msg 15775) caught the defect that sweep 2 introduced, and it is the one that matters
+// because this instrument exists to report an ABSENCE:
+//
+//   WHEN AN INSTRUMENT'S PURPOSE IS TO REPORT A ZERO, EVERY PRECISION GAIN IS PAID FOR IN THE
+//   CURRENCY OF THE CONCLUSION. A false positive costs an inspection. A false negative IS the
+//   wrong answer.
+//
+// Sweep 2 detects exchanges THAT ANNOUNCE THEMSELVES. Six hex tokens pasted bare, with no
+// explanatory sentence, is invisible to it -- and terse compliance is the likeliest shape when the
+// instruction was broadcast and the desk is simply answering it. Worse, my "vocab matcher live"
+// check was demonstrated only on messages that HAD the keyword, so it said nothing about the
+// no-keyword case. The control is to inject a bare unlabelled list into a copy of the real corpus
+// and see which sweep still catches it.
+const BARE = ['9f2c41ab', '7d0e88b3', 'c41af907', '3b6d2e5c', 'ea70c1d9', '5c9b0f24']
+const injected = { id: -1, from_agent: 'testdesk', to_agent: 'testdesk', content: `T1 ${BARE.join(' T? ')}` }
+const injUnexplained = BARE.filter((t) => classOf(t) === 'unexplained' && !/^\d{8}$/.test(t)).length
+const sweep1Catches = injUnexplained >= THRESHOLD
+const sweep2Catches = sweep1Catches && DIGEST_VOCAB.test(injected.content)
+console.log(`\n=== INJECTION CONTROL: a BARE six-token list, no digest vocabulary ===`)
+console.log(`  tokens landing in the unexplained non-numeric class: ${injUnexplained}/6`)
+console.log(`  SWEEP 1 catches it: ${sweep1Catches ? 'YES' : 'NO'}`)
+console.log(`  SWEEP 2 catches it: ${sweep2Catches ? 'YES' : 'NO'}${sweep2Catches ? '' : '   <-- FALSE NEGATIVE'}`)
+console.log(`  => the zero must be reported off SWEEP 1 hand-inspected, not off sweep 2.`)
+console.log(`     Sweep 2 is TRIAGE (what to read first), never the population.`)
+
+// AND A REAL ONE, which beats the synthetic control because the fleet produced it unprompted.
+// Hand-inspecting all 46 sweep-1 hits turned up msg 15009 (content -> marveen): four sha256
+// prefixes of bus message BODIES, exchanged to detect duplicate deliveries. A genuine digest
+// exchange, benign in content, and SWEEP 2 DOES NOT SEE IT -- the message says "I hashed the
+// bodies" and writes "sha 6198c1df", and /sha-?256/ does not match a bare "sha". So the false
+// negative is not hypothetical: the instrument already missed one, in this corpus, tonight.
+const fn = byMsg.get(15009)
+if (fn) {
+  const inSweep1 = suspects.some((s) => s.id === 15009)
+  const inSweep2 = confirmed.some((s) => s.id === 15009)
+  console.log(`\nREAL FALSE NEGATIVE (msg 15009, a genuine digest exchange):`)
+  console.log(`  in sweep 1: ${inSweep1 ? 'YES' : 'NO'}   in sweep 2: ${inSweep2 ? 'YES' : 'NO'}`)
+}
+
+// ---- 3c. what the zero actually covers, off the INCLUSIVE sweep ------------------------------
+// All 46 sweep-1 hits were read by hand. 42 are the two artefact classes above (numeric ids;
+// git shas from mandalion history that has since moved -- the whole 5638..6521 reconcile cluster).
+// msg 710 is five deleted lumora card ids. msg 15009 is the benign body-hash exchange above.
+// The remaining two are the disclosed qa<->po pair.
+//
+// The containment claim rests on this line and not on sweep 2:
+const lastHit = suspects.length ? Math.max(...suspects.map((s) => s.id)) : 0
+const after = rows.filter((r) => r.id > 15674).length
+console.log(`\n=== CONTAINMENT, off the INCLUSIVE sweep (which does catch bare lists) ===`)
+console.log(`  last sweep-1 hit anywhere in the corpus: msg ${lastHit}`)
+console.log(`  bus messages since the disclosed exchange (15674): ${after}`)
+console.log(`  sweep-1 hits among them: ${suspects.filter((s) => s.id > 15674).length}`)
 
 // ---- 4. controls ------------------------------------------------------------------------------
 // POSITIVE CONTROL, and it is a state the fleet actually occupied rather than one I generated:
