@@ -22,8 +22,18 @@ if [ "${DEBUG:-0}" = "1" ]; then
   # Sikeres futasnal toroljuk, hibasnal marad - a trace pont akkor kell, amikor elszallt.
   # Enelkul minden sikeres DEBUG-telepites hagy egy korlatlan ideig elo credential-fajlt:
   # a "pasteable outputbol on-disk fajlba" csere csak akkor jo csere, ha a fajlnak vege van.
-  # Az EXIT trap megorzi az eredeti kilepesi kodot (merve: rc=0 -> torol, rc=3 -> megtart).
-  trap '[ $? -eq 0 ] && rm -f "$_XTRACE_LOG"' EXIT
+  #
+  # A siker-predikatum POZITIV FLAG, nem "$? -eq 0". Signal-vezerelt kilepesnel a trap
+  # belepesekor a $? az utolso BEFEJEZETT parancs statusza, nem signal-eredetu kod, es az
+  # rendszerint sikerult - igy a $?-alapu feltetel Ctrl-C-re 0-t olvas es torli a trace-t
+  # (merve: exit 3 -> megmarad, SIGINT -> torolve, SIGTERM -> torolve). Egy megszakitott
+  # telepites pont az, aminek a trace-e kell. Ennel nagyobb baj az irany: a "$? -eq 0"
+  # a hibabizonyitek HIANYAT tekinti a siker bizonyitekanak (default-allow), es ha valaki
+  # valaha megforditja torlest-hacsak-nem-hiba logikara, ugyanez a mechanizmus fail-open
+  # lesz es epp a Ctrl-C uton hagyja ott a credential-fajlt. A flag csak akkor 1, ha a
+  # futas bizonyitottan vegigert (set -e miatt barmely hiba elotte megszakit), tehat a
+  # torleshez pozitiv bizonyitek kell.
+  trap '[ "${_INSTALL_OK:-0}" = 1 ] && rm -f "$_XTRACE_LOG"' EXIT
   set -x
   printf '%s\n' "  ! DEBUG trace -> $_XTRACE_LOG (credentialt tartalmaz, ne oszd meg; sikeres telepitesnel torlodik)" >&2
 fi
@@ -135,7 +145,7 @@ while [[ $# -gt 0 ]]; do
       echo "               \$HOME/.claude with the existing install. Individually overridable"
       echo "               via AGENT_SESSION_PREFIX / MAIN_AGENT_CONFIG_DIR /"
       echo "               SCHEDULED_TASKS_DIR / CHANNEL_STATE_DIR env vars."
-      exit 0 ;;
+      _INSTALL_OK=1; exit 0 ;;   # szandekolt sikeres kilepes: a trace torolheto
     *) echo "Unknown option: $1 (use --help for usage)" >&2; exit 1 ;;
   esac
 done
@@ -649,6 +659,7 @@ if [ "$IS_HEADLESS" = "true" ]; then
   CONTINUE_MCP=${CONTINUE_MCP:-i}
   if [ "$CONTINUE_MCP" != "i" ] && [ "$CONTINUE_MCP" != "y" ]; then
     echo -e "  ${DIM}Installation aborted. Disable the unnecessary MCPs, then run again.${NC}"
+    _INSTALL_OK=1   # a felhasznalo valasztotta a kilepest, credential meg nem hangzott el
     exit 0
   fi
 fi
@@ -1805,3 +1816,7 @@ echo -e "  ${DIM}  ./scripts/start.sh${NC}                           $(_t linux.
 echo -e "  ${DIM}  ./scripts/stop.sh${NC}                            -- stop"
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+# A DEBUG-trace siker-flagje: a script vegigert, a trap innentol torolheti a trace-t.
+# Utolso utasitasnak kell lennie - barmi, ami ez utan hibazhat, mar torlodott trace-szel hibazna.
+_INSTALL_OK=1
