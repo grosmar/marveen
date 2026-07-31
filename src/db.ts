@@ -2123,6 +2123,46 @@ export function listAgentMessages(limit = 50): AgentMessage[] {
   return db.prepare('SELECT * FROM agent_messages ORDER BY created_at DESC LIMIT ?').all(limit) as AgentMessage[]
 }
 
+// Bus forensics primitive. The last-N-newest-first shape of listAgentMessages
+// can only answer "what happened recently"; it cannot answer "show me every row
+// since id X", which is the question every bus investigation actually asks.
+// Without it a caller reaches for limit=5000, gets silently clamped to the cap,
+// and reports the resulting window as a census (2026-07-31: an agent audited a
+// routing complaint over a window that structurally excluded the disputed rows
+// and escalated a transport fault that did not exist).
+//
+// `sinceId` is an EXCLUSIVE lower bound and flips the order to ascending, so it
+// works as a forward cursor: pass the last id you received to get the next page.
+// `beforeId` is the existing exclusive upper bound (descending, scroll-up).
+// Callers detect truncation from the row count against the limit they asked for.
+export function queryAgentMessages(opts: {
+  agent?: string
+  to?: string
+  from?: string
+  status?: string
+  sinceId?: number
+  beforeId?: number
+  limit?: number
+}): AgentMessage[] {
+  const cap = Math.min(Math.max(1, Math.floor(opts.limit ?? 50) || 1), AGENT_MESSAGE_LIMIT_CAP)
+  const where: string[] = []
+  const params: (string | number)[] = []
+
+  if (opts.agent) { where.push('(from_agent = ? OR to_agent = ?)'); params.push(opts.agent, opts.agent) }
+  if (opts.to) { where.push('to_agent = ?'); params.push(opts.to) }
+  if (opts.from) { where.push('from_agent = ?'); params.push(opts.from) }
+  if (opts.status) { where.push('status = ?'); params.push(opts.status) }
+  if (opts.sinceId !== undefined) { where.push('id > ?'); params.push(opts.sinceId) }
+  if (opts.beforeId !== undefined) { where.push('id < ?'); params.push(opts.beforeId) }
+
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  // Ascending only when paging FORWARD from sinceId; every other read stays
+  // newest-first so existing callers and the dashboard are unaffected.
+  const order = opts.sinceId !== undefined ? 'ORDER BY id ASC' : 'ORDER BY created_at DESC, id DESC'
+  params.push(cap)
+  return db.prepare(`SELECT * FROM agent_messages ${clause} ${order} LIMIT ?`).all(...params) as AgentMessage[]
+}
+
 // System/automation participants that are not real conversation peers. They are
 // excluded as THREAD rows in the dashboard sidebar (you don't chat with the
 // heartbeat or the coordinator), but messages involving them still count toward
@@ -2130,7 +2170,9 @@ export function listAgentMessages(limit = 50): AgentMessage[] {
 // getAgentConversation returns when you open it).
 export const CHAT_SYSTEM_AGENTS = ['heartbeat', 'telegram-coordinator', 'channel-coordinator', 'system'] as const
 
-const AGENT_MESSAGE_LIMIT_CAP = 200
+// Exported so the HTTP layer clamps to the SAME number it advertises in the
+// X-Result-Limit-Clamped header; a second literal would drift from this one.
+export const AGENT_MESSAGE_LIMIT_CAP = 200
 
 // The actual last-N messages for ONE agent, filtered in SQL (NOT global-last-N
 // then JS-filter -- that starved rarely-active agents' threads, dashboard bug

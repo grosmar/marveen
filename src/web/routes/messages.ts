@@ -1,5 +1,6 @@
 import {
-  createAgentMessage, getPendingMessages, listAgentMessages,
+  createAgentMessage, getPendingMessages, queryAgentMessages,
+  AGENT_MESSAGE_LIMIT_CAP as MESSAGE_LIMIT_CAP,
   getAgentConversation, getAgentConversationThreads,
   getKanbanSeqByIdPrefix,
   markMessageDone, markMessageFailed, getAgentMessage,
@@ -147,24 +148,76 @@ export async function tryHandleMessages(ctx: RouteContext): Promise<boolean> {
   }
 
   if (path === '/api/messages' && method === 'GET') {
+    // Strict query contract. This endpoint used to accept anything and answer
+    // whatever it understood: `to=` was never implemented, so watchdog.sh's
+    // "?to=<agent>&limit=200" silently received the GLOBAL last 200 rows, and
+    // `limit=5000` was clamped to 200 with no signal. Both return a well-formed
+    // 200 that looks like the answer to the question asked. On 2026-07-31 that
+    // cost the fleet a false transport-fault escalation (an audit whose window
+    // could not contain the disputed rows) and left the restart-replay path
+    // reading a corpus far shorter than the 2h it believes it is scanning.
+    //
+    // A read endpoint returning the wrong population is worse than one
+    // returning an error, because the caller reports it as a census. Reject
+    // what we do not implement, and say what we do.
+    const ALLOWED = ['agent', 'to', 'from', 'status', 'limit', 'before', 'since_id'] as const
+    for (const key of url.searchParams.keys()) {
+      if (!(ALLOWED as readonly string[]).includes(key)) {
+        json(res, {
+          error: `unknown query parameter "${key}"`,
+          allowed: ALLOWED,
+          hint: 'Parameters used to be ignored silently, which returned a narrower result than asked for. Fix the query rather than trusting a partial answer.',
+        }, 400)
+        return true
+      }
+    }
+
+    const intParam = (name: string): number | undefined | null => {
+      const raw = url.searchParams.get(name)
+      if (raw === null) return undefined
+      const n = parseInt(raw, 10)
+      return Number.isFinite(n) ? n : null // null = present but unparseable
+    }
+
     const agent = url.searchParams.get('agent') || ''
+    const to = url.searchParams.get('to') || ''
+    const from = url.searchParams.get('from') || ''
     const status = url.searchParams.get('status') || ''
-    const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 200)
-    const beforeRaw = url.searchParams.get('before')
-    const before = beforeRaw !== null ? parseInt(beforeRaw, 10) : undefined
+    const beforeRaw = intParam('before')
+    const sinceRaw = intParam('since_id')
+    const limitRaw = intParam('limit')
+    if (beforeRaw === null) { json(res, { error: '"before" must be an integer' }, 400); return true }
+    if (sinceRaw === null) { json(res, { error: '"since_id" must be an integer' }, 400); return true }
+    if (limitRaw === null) { json(res, { error: '"limit" must be an integer' }, 400); return true }
+    const before = beforeRaw
+    const sinceId = sinceRaw
+    const requested = limitRaw ?? 50
+    if (requested < 1) { json(res, { error: '"limit" must be >= 1' }, 400); return true }
+    const limit = Math.min(requested, MESSAGE_LIMIT_CAP)
 
     let messages: AgentMessage[]
-    if (status === 'pending' && agent) {
-      messages = getPendingMessages(agent)
-    } else if (status === 'pending') {
-      messages = getPendingMessages()
-    } else if (agent) {
+    if (status === 'pending' && !to && !from && !before && sinceId === undefined) {
+      // Preserved verbatim: the pending path is UNCAPPED on purpose -- the
+      // router and the depth watchdogs need the true queue, not a page of it.
+      messages = agent ? getPendingMessages(agent) : getPendingMessages()
+    } else if (agent && !to && !from && !status && sinceId === undefined) {
       // SQL-filtered to THIS agent's last N (+ before-cursor pagination), not
       // global-last-N-then-JS-filter which starved rarely-active threads.
-      messages = getAgentConversation(agent, limit, Number.isFinite(before as number) ? before : undefined)
+      messages = getAgentConversation(agent, limit, before)
     } else {
-      messages = listAgentMessages(limit)
+      messages = queryAgentMessages({
+        agent: agent || undefined, to: to || undefined, from: from || undefined,
+        status: status || undefined, sinceId, beforeId: before, limit,
+      })
     }
+
+    // Truncation is now detectable without counting rows against a cap you have
+    // to know about. `since_id` pages forward: resend it with the last id here.
+    res.setHeader('X-Result-Count', String(messages.length))
+    res.setHeader('X-Result-Limit', String(limit))
+    if (requested > MESSAGE_LIMIT_CAP) res.setHeader('X-Result-Limit-Clamped', `${requested}->${MESSAGE_LIMIT_CAP}`)
+    res.setHeader('X-Result-Truncated', messages.length >= limit ? 'true' : 'false')
+    res.setHeader('X-Result-Order', sinceId !== undefined ? 'id-asc' : 'created-desc')
 
     jsonMaybeGzip(req, res, messages)
     return true
