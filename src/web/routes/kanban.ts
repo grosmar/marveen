@@ -10,6 +10,7 @@ import {
   listLabels, getLabel, createLabel, updateLabel, deleteLabel,
   addLabelToCard, removeLabelFromCard, getLabelsForAllCards, getLabelsForCard,
   listArchivedKanbanCards,
+  countArchivedKanbanCards,
   revertIdeaFromKanban,
 } from '../../db.js'
 import { normalizeKanbanRefs } from '../kanban-ref-normalize.js'
@@ -276,7 +277,14 @@ export async function tryHandleKanban(ctx: RouteContext): Promise<boolean> {
     const labelsByCard = getLabelsForAllCards()
     const cards = listArchivedKanbanCards({ q, project, label, from, to, limit })
       .map(card => ({ ...card, labels: labelsByCard.get(card.id) ?? [] }))
-    json(res, { cards, total: cards.length, limit })
+    // `total` is the count of MATCHING cards, not of returned ones. It used to be
+    // cards.length, which made every truncated read look complete: 1119 archived cards,
+    // limit 500, response said total 500. A silent cap is how a truncated pull becomes a
+    // confident zero -- a desk asking "is there a card for this" got told no by a corpus
+    // that structurally could not contain the answer. `truncated` states it outright so a
+    // caller does not have to compare two numbers to notice.
+    const total = countArchivedKanbanCards({ q, project, label, from, to })
+    json(res, { cards, total, returned: cards.length, limit, truncated: total > cards.length })
     return true
   }
 

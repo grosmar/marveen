@@ -1740,19 +1740,22 @@ export interface ArchivedKanbanCard {
   updated_at: number
 }
 
-export function listArchivedKanbanCards(opts: {
+type ArchivedKanbanFilter = {
   q?: string
   project?: string
   label?: string
   from?: number
   to?: number
-  limit: number
-}): ArchivedKanbanCard[] {
-  const { q, project, label, from, to, limit } = opts
-  let sql = `
-    SELECT DISTINCT kc.id, kc.title, kc.status, kc.project, kc.priority, kc.assignee, kc.archived_at, kc.updated_at
-    FROM kanban_cards kc
-  `
+}
+
+// The FROM + WHERE for archived cards, built once and shared by the list and the count.
+// Shared deliberately: countArchivedKanbanCards exists so a truncated page can announce
+// itself, and it can only do that if it counts over the SAME predicate the page was cut
+// from. Two hand-kept copies of this WHERE drift, and the first symptom of the drift is a
+// total that disagrees with its own rows -- which is worse than the missing total was.
+function archivedKanbanFrom(f: ArchivedKanbanFilter): { sql: string; params: unknown[] } {
+  const { q, project, label, from, to } = f
+  let sql = ' FROM kanban_cards kc'
   const params: unknown[] = []
   if (label) {
     sql += `
@@ -1770,9 +1773,28 @@ export function listArchivedKanbanCards(opts: {
     const like = `%${q}%`
     params.push(like, like, like)
   }
-  sql += ' ORDER BY kc.archived_at DESC LIMIT ?'
-  params.push(limit)
-  return db.prepare(sql).all(...params) as ArchivedKanbanCard[]
+  return { sql, params }
+}
+
+export function listArchivedKanbanCards(opts: ArchivedKanbanFilter & {
+  limit: number
+}): ArchivedKanbanCard[] {
+  const { limit } = opts
+  const base = archivedKanbanFrom(opts)
+  const sql =
+    'SELECT DISTINCT kc.id, kc.title, kc.status, kc.project, kc.priority, kc.assignee, kc.archived_at, kc.updated_at' +
+    base.sql + ' ORDER BY kc.archived_at DESC LIMIT ?'
+  return db.prepare(sql).all(...base.params, limit) as ArchivedKanbanCard[]
+}
+
+// How many archived cards MATCH, as opposed to how many were returned. Without this the
+// endpoint reported `total: cards.length` -- the size of the page it had just cut, so a
+// read truncated at the limit announced itself as complete. 1119 archived cards, a limit
+// of 500, and a caller told total 500 with nothing to suggest 619 were missing.
+export function countArchivedKanbanCards(f: ArchivedKanbanFilter = {}): number {
+  const base = archivedKanbanFrom(f)
+  const row = db.prepare('SELECT COUNT(DISTINCT kc.id) AS n' + base.sql).get(...base.params) as { n: number }
+  return row?.n ?? 0
 }
 
 export function listKanbanProjects(): string[] {
