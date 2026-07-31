@@ -1,5 +1,5 @@
 import { json } from '../http-helpers.js'
-import { queryAuditLog, type AuditSource } from '../../db.js'
+import { queryAuditLog, countAuditLog, type AuditSource } from '../../db.js'
 import { getEffectiveSettingValue } from '../../settings-store.js'
 import type { RouteContext } from './types.js'
 
@@ -52,6 +52,12 @@ export async function tryHandleAuditLog(ctx: RouteContext): Promise<boolean> {
   }
 
   const entries = queryAuditLog({ sources, from, to, q, agent, limit })
-  json(res, { entries, total: entries.length })
+  // `total` is the count of MATCHING entries, not of returned ones. It used to be
+  // entries.length, which made every truncated read look complete -- and the default limit
+  // here is 200, so an audit question ("did this key ever change", "did that agent touch the
+  // store") could be answered no by a page that was silently cut. `truncated` states it
+  // outright so a caller does not have to compare two numbers to notice.
+  const total = countAuditLog({ sources, from, to, q, agent })
+  json(res, { entries, total, returned: entries.length, limit, truncated: total > entries.length })
   return true
 }

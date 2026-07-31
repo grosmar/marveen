@@ -2999,6 +2999,63 @@ export interface AuditLogEntry {
   entry_type?: 'log' | 'memory'
 }
 
+type AuditFilter = { from?: number; to?: number; q?: string; agent?: string }
+type AuditTable = 'config' | 'idea' | 'store' | 'diary_logs' | 'diary_memories'
+
+// The WHERE for one audit table, built once and shared by the query and the count.
+// Shared deliberately: countAuditLog exists so a truncated page can announce itself, and it
+// can only do that if it counts over the SAME predicate the page was cut from. Five WHEREs
+// kept by hand in two places drift, and the first symptom of the drift is a total that
+// disagrees with its own rows -- which is worse than the missing total was.
+// Param order is positional and must match the column order in each branch.
+function auditWhere(table: AuditTable, f: AuditFilter): { sql: string; params: unknown[] } {
+  const { from, to, q, agent } = f
+  let sql = ' WHERE 1=1'
+  const params: unknown[] = []
+  if (from) { sql += ' AND created_at >= ?'; params.push(from) }
+  if (to)   { sql += ' AND created_at <= ?'; params.push(to) }
+  switch (table) {
+    case 'config':
+      if (q) { sql += ' AND (key LIKE ? OR old_value LIKE ? OR new_value LIKE ? OR actor LIKE ?)'; const p = `%${q}%`; params.push(p, p, p, p) }
+      break
+    case 'idea':
+      if (q) { sql += ' AND (idea_id LIKE ? OR to_status LIKE ? OR note LIKE ? OR actor LIKE ?)'; const p = `%${q}%`; params.push(p, p, p, p) }
+      break
+    case 'store':
+      if (agent) { sql += ' AND agent = ?'; params.push(agent) }
+      if (q)     { sql += ' AND (rel_path LIKE ? OR agent LIKE ?)'; const p = `%${q}%`; params.push(p, p) }
+      break
+    case 'diary_logs':
+      if (agent) { sql += ' AND agent_id = ?'; params.push(agent) }
+      if (q)     { sql += ' AND content LIKE ?'; params.push(`%${q}%`) }
+      break
+    case 'diary_memories':
+      if (agent) { sql += ' AND agent_id = ?'; params.push(agent) }
+      if (q)     { sql += ' AND (content LIKE ? OR keywords LIKE ?)'; params.push(`%${q}%`, `%${q}%`) }
+      break
+  }
+  return { sql, params }
+}
+
+const AUDIT_TABLE_NAME: Record<AuditTable, string> = {
+  config: 'config_change_log',
+  idea: 'idea_status_log',
+  store: 'store_file_audit',
+  diary_logs: 'daily_logs',
+  diary_memories: 'memories',
+}
+
+function auditTablesFor(sources: AuditSource[]): AuditTable[] {
+  const all: AuditSource[] = ['config', 'idea', 'store', 'diary']
+  const active = sources.length > 0 ? sources : all
+  const tables: AuditTable[] = []
+  if (active.includes('config')) tables.push('config')
+  if (active.includes('idea')) tables.push('idea')
+  if (active.includes('store')) tables.push('store')
+  if (active.includes('diary')) tables.push('diary_logs', 'diary_memories')
+  return tables
+}
+
 export function queryAuditLog(opts: {
   sources: AuditSource[]
   from?: number
@@ -3007,73 +3064,72 @@ export function queryAuditLog(opts: {
   agent?: string
   limit: number
 }): AuditLogEntry[] {
-  const { sources, from, to, q, agent, limit } = opts
-  const all: AuditSource[] = ['config', 'idea', 'store', 'diary']
-  const active = sources.length > 0 ? sources : all
+  const { sources, limit } = opts
+  const active = sources.length > 0 ? sources : (['config', 'idea', 'store', 'diary'] as AuditSource[])
 
   const parts: AuditLogEntry[] = []
+  const tail = ' ORDER BY created_at DESC, id DESC LIMIT ?'
 
   if (active.includes('config')) {
-    let sql = 'SELECT id, key, old_value, new_value, actor, created_at FROM config_change_log WHERE 1=1'
-    const params: unknown[] = []
-    if (from) { sql += ' AND created_at >= ?'; params.push(from) }
-    if (to)   { sql += ' AND created_at <= ?'; params.push(to) }
-    if (q)    { sql += ' AND (key LIKE ? OR old_value LIKE ? OR new_value LIKE ? OR actor LIKE ?)'; const p = `%${q}%`; params.push(p, p, p, p) }
-    sql += ' ORDER BY created_at DESC, id DESC LIMIT ?'; params.push(limit)
-    const rows = db.prepare(sql).all(...params) as ConfigChangeLogRow[]
+    const w = auditWhere('config', opts)
+    const rows = db.prepare('SELECT id, key, old_value, new_value, actor, created_at FROM config_change_log' + w.sql + tail)
+      .all(...w.params, limit) as ConfigChangeLogRow[]
     for (const r of rows) parts.push({ ...r, source: 'config' })
   }
 
   if (active.includes('idea')) {
-    let sql = 'SELECT id, idea_id, from_status, to_status, actor, note, created_at FROM idea_status_log WHERE 1=1'
-    const params: unknown[] = []
-    if (from) { sql += ' AND created_at >= ?'; params.push(from) }
-    if (to)   { sql += ' AND created_at <= ?'; params.push(to) }
-    if (q)    { sql += ' AND (idea_id LIKE ? OR to_status LIKE ? OR note LIKE ? OR actor LIKE ?)'; const p = `%${q}%`; params.push(p, p, p, p) }
-    sql += ' ORDER BY created_at DESC, id DESC LIMIT ?'; params.push(limit)
-    const rows = db.prepare(sql).all(...params) as Array<{ id: number; idea_id: string; from_status: string | null; to_status: string; actor: string; note: string | null; created_at: number }>
+    const w = auditWhere('idea', opts)
+    const rows = db.prepare('SELECT id, idea_id, from_status, to_status, actor, note, created_at FROM idea_status_log' + w.sql + tail)
+      .all(...w.params, limit) as Array<{ id: number; idea_id: string; from_status: string | null; to_status: string; actor: string; note: string | null; created_at: number }>
     for (const r of rows) parts.push({ ...r, source: 'idea' })
   }
 
   if (active.includes('store')) {
-    let sql = 'SELECT id, rel_path, event_type, is_sensitive, file_size, agent, created_at FROM store_file_audit WHERE 1=1'
-    const params: unknown[] = []
-    if (from) { sql += ' AND created_at >= ?'; params.push(from) }
-    if (to)   { sql += ' AND created_at <= ?'; params.push(to) }
-    if (agent) { sql += ' AND agent = ?'; params.push(agent) }
-    if (q)    { sql += ' AND (rel_path LIKE ? OR agent LIKE ?)'; const p = `%${q}%`; params.push(p, p) }
-    sql += ' ORDER BY created_at DESC, id DESC LIMIT ?'; params.push(limit)
-    const rows = db.prepare(sql).all(...params) as StoreFileAuditRow[]
+    const w = auditWhere('store', opts)
+    const rows = db.prepare('SELECT id, rel_path, event_type, is_sensitive, file_size, agent, created_at FROM store_file_audit' + w.sql + tail)
+      .all(...w.params, limit) as StoreFileAuditRow[]
     for (const r of rows) parts.push({ ...r, source: 'store' })
   }
 
   if (active.includes('diary')) {
-    // daily_logs
-    let logSql = 'SELECT id, agent_id, content, created_at FROM daily_logs WHERE 1=1'
-    const logParams: unknown[] = []
-    if (from)  { logSql += ' AND created_at >= ?'; logParams.push(from) }
-    if (to)    { logSql += ' AND created_at <= ?'; logParams.push(to) }
-    if (agent) { logSql += ' AND agent_id = ?'; logParams.push(agent) }
-    if (q)     { logSql += ' AND content LIKE ?'; logParams.push(`%${q}%`) }
-    logSql += ' ORDER BY created_at DESC, id DESC LIMIT ?'; logParams.push(limit)
-    const logRows = db.prepare(logSql).all(...logParams) as Array<{ id: number; agent_id: string; content: string; created_at: number }>
+    const wl = auditWhere('diary_logs', opts)
+    const logRows = db.prepare('SELECT id, agent_id, content, created_at FROM daily_logs' + wl.sql + tail)
+      .all(...wl.params, limit) as Array<{ id: number; agent_id: string; content: string; created_at: number }>
     for (const r of logRows) parts.push({ id: r.id, source: 'diary', created_at: r.created_at, agent_id: r.agent_id, content: r.content, entry_type: 'log' })
 
-    // memories
-    let memSql = 'SELECT id, agent_id, content, category, keywords, created_at FROM memories WHERE 1=1'
-    const memParams: unknown[] = []
-    if (from)  { memSql += ' AND created_at >= ?'; memParams.push(from) }
-    if (to)    { memSql += ' AND created_at <= ?'; memParams.push(to) }
-    if (agent) { memSql += ' AND agent_id = ?'; memParams.push(agent) }
-    if (q)     { memSql += ' AND (content LIKE ? OR keywords LIKE ?)'; memParams.push(`%${q}%`, `%${q}%`) }
-    memSql += ' ORDER BY created_at DESC, id DESC LIMIT ?'; memParams.push(limit)
-    const memRows = db.prepare(memSql).all(...memParams) as Array<{ id: number; agent_id: string; content: string; category: string; keywords: string | null; created_at: number }>
+    const wm = auditWhere('diary_memories', opts)
+    const memRows = db.prepare('SELECT id, agent_id, content, category, keywords, created_at FROM memories' + wm.sql + tail)
+      .all(...wm.params, limit) as Array<{ id: number; agent_id: string; content: string; category: string; keywords: string | null; created_at: number }>
     for (const r of memRows) parts.push({ id: r.id, source: 'diary', created_at: r.created_at, agent_id: r.agent_id, content: r.content, category: r.category, keywords: r.keywords ?? undefined, entry_type: 'memory' })
   }
 
-  // Merge and sort by created_at DESC, then id DESC as tiebreaker
+  // Merge and sort by created_at DESC, then id DESC as tiebreaker.
+  // Taking the top `limit` of each source, merging, and slicing to `limit` yields exactly the
+  // true merged top `limit` -- an entry outside a source's own top `limit` cannot place inside
+  // the merged one. So the page is right; only the TOTAL needed a separate query.
   parts.sort((a, b) => b.created_at - a.created_at || (b.id ?? 0) - (a.id ?? 0))
   return parts.slice(0, limit)
+}
+
+// How many audit entries MATCH, as opposed to how many were returned. Without this the
+// endpoint reported `total: entries.length` -- the size of the page it had just cut, so a read
+// truncated at the limit announced itself as complete. On an AUDIT surface that is the worst
+// place for it: "did this key ever change", "did that agent ever touch the store" gets a
+// confident answer from a corpus that was silently cut at 200.
+export function countAuditLog(opts: {
+  sources: AuditSource[]
+  from?: number
+  to?: number
+  q?: string
+  agent?: string
+}): number {
+  let n = 0
+  for (const t of auditTablesFor(opts.sources)) {
+    const w = auditWhere(t, opts)
+    const row = db.prepare(`SELECT COUNT(*) AS n FROM ${AUDIT_TABLE_NAME[t]}${w.sql}`).get(...w.params) as { n: number }
+    n += row?.n ?? 0
+  }
+  return n
 }
 
 // Prune all three audit tables to AUDIT_LOG_RETENTION_DAYS. Called from the

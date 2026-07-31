@@ -94,7 +94,8 @@ export async function tryHandleMemories(ctx: RouteContext): Promise<boolean> {
     }
     const agentId = url.searchParams.get('agent') || agentIdAlias || ''
     const tier = url.searchParams.get('tier') || url.searchParams.get('category') || ''
-    const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 200)
+    const requestedLimit = parseInt(url.searchParams.get('limit') || '50', 10)
+    const limit = Math.min(requestedLimit, 200)
     const mode = url.searchParams.get('mode') || 'fts'
 
     let results: Memory[]
@@ -120,6 +121,11 @@ export async function tryHandleMemories(ctx: RouteContext): Promise<boolean> {
       results = getMemoriesForChat(ALLOWED_CHAT_ID, limit)
     }
 
+    // Measured BEFORE the tier post-filter, because the cap bites at the SQL LIMIT and the
+    // post-filter only shrinks what came back. Testing the filtered length would call a
+    // truncated read complete whenever a tier filter happened to drop a row.
+    const cappedAtLimit = results.length >= limit
+
     // Still needed for the search branches above, which rank by relevance and
     // cannot push the category down into their own LIMIT. A no-op for the
     // plain agent listing, which already filtered in SQL.
@@ -138,6 +144,16 @@ export async function tryHandleMemories(ctx: RouteContext): Promise<boolean> {
       created_label: new Date(m.created_at * 1000).toLocaleString('hu-HU', { timeZone: APP_TZ }),
       accessed_label: new Date(m.accessed_at * 1000).toLocaleString('hu-HU', { timeZone: APP_TZ }),
     }))
+    // This response is a bare array, so a `total` field would break every consumer. Headers are
+    // the non-breaking form, and they match GET /api/messages, fixed the same way in 9274833.
+    // No real count here on purpose: the search branches rank by relevance, so "how many would
+    // have matched" is a different question from "what ranked in the top N" and a total over the
+    // first would misdescribe the second. State the cap instead and let the caller re-ask wider.
+    res.setHeader('X-Result-Limit', String(limit))
+    if (Number.isFinite(requestedLimit) && requestedLimit > 200) {
+      res.setHeader('X-Result-Limit-Clamped', `${requestedLimit}->200`)
+    }
+    res.setHeader('X-Result-Truncated', cappedAtLimit ? 'true' : 'false')
     jsonMaybeGzip(req, res, formatted)
     return true
   }
