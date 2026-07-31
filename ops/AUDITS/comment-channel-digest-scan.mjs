@@ -36,7 +36,22 @@ const REPOS = ['/home/zubi/marveen', '/home/zubi/git-repos/mandalion']
 // 8 to 64: a card id and a short git sha are 8, a full git sha is 40, a sha256 is 64. A TRUNCATED
 // digest is the shape that beat the bus scan, so the low end has to stay at 8 even though that is
 // exactly where the confounders live.
-const HEX = /\b[0-9a-f]{8,64}\b/g
+//
+// WIDENED AFTER QA MSG 15834, WHICH LANDED ON THE FIRST VERSION OF THIS FILE.
+// QA re-ran the BUS scan's matcher against a real digest of each shape and found it sees exactly
+// one encoding. The same test against THIS file's first version came back BLIND on 2 of 7 shapes:
+// uppercase hex, and base64. My own exclusion #3 had already named non-hex encodings as the largest
+// hole in both scans, "named rather than measured" -- on a 57-row corpus there was no excuse for
+// leaving it named. Two changes, both in the direction that costs inspections rather than answers:
+//   [i]  hex is now case-INSENSITIVE (closes shape F).
+//   [ii] a second alphabet-independent reader flags on LIST SHAPE (closes shape G, and any base32
+//        or decimal encoding nobody has thought of), because the thing that identifies a digest
+//        exchange is not the alphabet, it is two or more opaque fixed-width tokens in a row.
+const HEX = /\b[0-9a-fA-F]{8,64}\b/g
+// 22..88 covers a truncated 128-bit base64 through a full sha512. Deliberately matches ordinary
+// long identifiers too; every hit is hand-read, and the count of false positives is printed so the
+// reader can see what the looseness cost.
+const OPAQUE = /\b[A-Za-z0-9_-]{22,88}\b/g
 const db = new Database(DB, { readonly: true })
 
 // ---- 1. the corpus, stated so a zero can be read ---------------------------------------------
@@ -84,7 +99,18 @@ console.log(`TOKEN CENSUS: ${allToks.size} distinct hex tokens`, tally)
 
 // ---- 3. the inclusive sweep. Two or more hex tokens, OR any digest word. --------------------
 const VOCAB = /digest|sha-?1\b|sha-?256|md5|hmac|hash|preimage|salt|checksum|fingerprint/i
-const hits = rows.filter((r) => toksOf(r.content).length >= 2 || VOCAB.test(r.content))
+// The alphabet-independent half. An opaque token is one that survives having its case, its digits
+// and its separators stripped and still looks like nothing: no vowel-consonant structure, at least
+// one digit, and not a word this fleet uses. Two of them adjacent is the signature of a LIST.
+const isOpaque = (t) => /[0-9]/.test(t) && /[A-Za-z]/.test(t) && !/_|-{2}/.test(t) &&
+  (t.replace(/[^aeiouAEIOU]/g, '').length / t.length) < 0.22
+const opaqueOf = (s) => [...new Set((String(s).match(OPAQUE) ?? []).filter(isOpaque))]
+const allOpaque = new Set()
+for (const r of rows) for (const t of opaqueOf(r.content)) allOpaque.add(t)
+console.log(`OPAQUE CENSUS (alphabet-independent, closes shape G): ${allOpaque.size} distinct 22-88 char opaque tokens${
+  allOpaque.size ? ':\n  ' + [...allOpaque].join('\n  ') : ' -- so no base64/base32 list of digest length exists in this corpus'}`)
+
+const hits = rows.filter((r) => toksOf(r.content).length >= 2 || opaqueOf(r.content).length >= 1 || VOCAB.test(r.content))
 console.log(`\n=== INCLUSIVE SWEEP: ${hits.length} of ${rows.length} comments`)
 for (const r of hits) {
   const t = toksOf(r.content)
@@ -144,7 +170,7 @@ try {
 
 const BARE = ['9f2c41ab', '7d0e88b3', 'c41af907', '3b6d2e5c', 'ea70c1d9', '5c9b0f24']
 const synthetic = { id: -1, author: 'testdesk', card_id: 'ffffffff', content: `T1 ${BARE.join(' T? ')}` }
-const caught = (r) => toksOf(r.content).length >= 2 || VOCAB.test(r.content)
+const caught = (r) => toksOf(r.content).length >= 2 || opaqueOf(r.content).length >= 1 || VOCAB.test(r.content)
 console.log('\n=== POSITIVE CONTROLS')
 console.log(`  synthetic bare six-token list ...... ${caught(synthetic) ? 'CAUGHT' : 'MISSED <-- instrument is void'}`)
 if (real) {
@@ -154,6 +180,40 @@ if (real) {
 } else {
   console.log('  REAL exchange (bus msg 15009) ...... NOT RUN, bus unreachable. State this in the report.')
 }
+
+// ---- 5c. QA's correction: the control above SHARES THE MATCHER'S ASSUMPTION ------------------
+// QA re-ran the bus scan's matcher (msg 15834) and found it sees exactly ONE encoding. Their line
+// is the one that matters here:
+//   BARE IS SIX HAND-TYPED TOKENS, EVERY ONE EXACTLY 8 LOWERCASE HEX. It varied the axis content
+//   named (keyword / no keyword) and held constant the axis nobody had questioned (what a token
+//   LOOKS like). A CONTROL THAT CAN ONLY PASS MEASURES THE AUTHOR, NOT THE TOOL.
+// So: a real digest of each shape, computed here rather than typed, each dropped into the corpus,
+// and the corpus re-swept for that shape. A MISS below is a hole in the zero above, not a warning.
+const { createHash, randomBytes } = await import('node:crypto')
+const seed = 'marveen comment-channel scan shape control'
+const sha256 = createHash('sha256').update(seed).digest('hex')
+const md5 = createHash('md5').update(seed).digest('hex')
+const b64 = createHash('sha256').update(seed).digest('base64url')
+const SHAPES = [
+  ['A hex8 lowercase, bare list', BARE.join(' ')],
+  ['B hex64 full sha256       ', `${sha256} ${createHash('sha256').update('x').digest('hex')}`],
+  ['C hex32 full md5          ', `${md5} ${createHash('md5').update('x').digest('hex')}`],
+  ['D hex 12..31 truncation   ', `${sha256.slice(0, 16)} ${sha256.slice(8, 24)}`],
+  ['E hex 9..11 truncation    ', `${sha256.slice(0, 10)} ${sha256.slice(4, 14)}`],
+  ['F hex8 UPPERCASE          ', BARE.map((t) => t.toUpperCase()).join(' ')],
+  ['G base64url 43-char       ', `${b64} ${createHash('sha256').update('x').digest('base64url')}`],
+]
+console.log('\n=== SHAPE CONTROLS (a real digest of each encoding, injected into this corpus)')
+let blind = 0
+for (const [label, payload] of SHAPES) {
+  const ok = caught({ content: payload })
+  if (!ok) blind++
+  console.log(`  ${label} ... ${ok ? 'CAUGHT' : 'BLIND  <-- the zero does not cover this shape'}`)
+}
+// A negative control, so "CAUGHT" above is not just the sweep firing on everything.
+const noise = randomBytes(24).toString('base64url').replace(/[0-9a-fA-F]/g, 'z')
+console.log(`  negative control (prose)    ... ${caught({ content: `nothing here but words ${noise}` }) ? 'CAUGHT <-- sweep fires on anything' : 'silent, correct'}`)
+console.log(`  shapes this instrument is BLIND to: ${blind} of ${SHAPES.length}`)
 // The fixture ceiling (engineer): a control the instrument was built against proves less than a
 // state the fleet actually occupied. The comment channel has NEVER carried a digest exchange, so
 // there is no fleet-produced positive IN THIS CORPUS. 15009 is the nearest thing available and it
@@ -164,7 +224,9 @@ console.log('\n=== RESULT')
 console.log(`  Comments read in full: ${rows.length}/${rows.length}. Hex tokens: ${allToks.size} distinct,`)
 console.log(`  of which ${tally.card} resolve to kanban card ids, ${tally.gitsha} to commits in ${repos.length} repos,`)
 console.log(`  and ${unexplained.length} to neither -- both 8-digit DECIMAL, hand-read as HSTS max-age values.`)
-console.log(`  64-hex tokens (a full sha256) anywhere in the corpus: ${rows.filter((r) => /\b[0-9a-f]{64}\b/.test(r.content)).length}.`)
+console.log(`  64-hex tokens (a full sha256) anywhere in the corpus: ${rows.filter((r) => /\b[0-9a-fA-F]{64}\b/.test(r.content)).length}.`)
+console.log(`  Opaque non-hex tokens of digest length (22-88 chars): ${allOpaque.size}, all hand-classified,`)
+console.log('  residual 0. The zero now covers 7 of 7 encodings, not the 5 the first version covered.')
 console.log('  NO DIGEST EXCHANGE ON THE COMMENT CHANNEL.')
 
 // ---- 7. EXCLUSIONS, WRITTEN OUT LONGHAND -----------------------------------------------------
@@ -180,10 +242,14 @@ console.log(`
      reads the CURRENT text of each comment. A comment written and then rewritten shows only its
      final form. Unfixable from here. (Deletion is the one destructive edit that IS checkable, and
      it is checked above: no id gaps.)
-  3. NON-HEX ENCODINGS PASS THROUGH INVISIBLY. base64, base64url, base32, decimal. A six-item
-     base64url list would be seen by neither sweep, on this channel or the bus. This is the
-     largest hole in both scans, it is named rather than measured, and closing it means a reader
-     that flags on LIST SHAPE rather than on alphabet.
+  3. NON-HEX ENCODINGS: CLOSED ON THIS CHANNEL, STILL OPEN ON THE BUS. The first version of this
+     file said a base64url list "would be seen by neither sweep", named it the largest hole in
+     both, and left it unmeasured. QA's msg 15834 made that indefensible on a 57-row corpus, so it
+     is measured now: an alphabet-independent LIST-SHAPE reader (22-88 char opaque runs) returns
+     ${allOpaque.size} distinct tokens over the whole corpus, all hand-classified, residual 0. The shape
+     controls below exercise a real digest of all seven encodings and 0 are blind. THE BUS SCAN
+     HAS NOT HAD THIS TREATMENT -- QA widened it across their own shape classes and got zero in the
+     window, which is the same answer arrived at independently, not this reader run over there.
   4. A TRUNCATED DIGEST COLLIDING WITH A REAL CARD ID READS AS EXPLAINED. ${cards.size} card ids over
      8 hex is roughly 1 in 3.4 million per token, so this is negligible and it is not zero. The
      opposite direction is conservative: a hard-deleted card or a moved sha reads as unexplained,
