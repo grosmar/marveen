@@ -10,6 +10,7 @@ import {
   markPendingFederatedFailed,
   setMessageResult,
   createAgentMessage,
+  getInboundLag,
   stampMessageTrace,
   upsertOtelSpan,
   type AgentMessage,
@@ -645,7 +646,14 @@ export async function runMessageRouterTick(): Promise<void> {
         // wrap (trusted/untrusted) carries the raw content. Single-source frame.
         // msgId passed so receiving agents can write back via PUT /api/messages/:id.
         const content = isChannelInbound ? deliveryContent : msg.content
-        const { prefix, wrapped } = wrapAgentMessageForDelivery(category, safeFromAgent, msg.from_agent, content, msg.id, msg.origin_note)
+        // How far behind the live bus this delivery is. Computed at SEND time,
+        // not enqueue time: the whole point is what the receiver's view is
+        // missing at the moment they read it.
+        const lag = getInboundLag(msg)
+        const { prefix, wrapped } = wrapAgentMessageForDelivery(category, safeFromAgent, msg.from_agent, content, msg.id, msg.origin_note, lag)
+        if (lag.ageSeconds >= 600 || lag.newerTotal >= 100) {
+          logger.warn({ id: msg.id, agent: msg.to_agent, ...lag }, 'message-router: delivering a STALE message, receiver warned')
+        }
         // Inline preamble so a fresh session (post hard-restart) doesn't miss
         // the context that explains the tag semantics.
         //

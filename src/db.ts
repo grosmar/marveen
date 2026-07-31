@@ -2174,6 +2174,33 @@ export const CHAT_SYSTEM_AGENTS = ['heartbeat', 'telegram-coordinator', 'channel
 // X-Result-Limit-Clamped header; a second literal would drift from this one.
 export const AGENT_MESSAGE_LIMIT_CAP = 200
 
+// How far behind the live bus a message being delivered right now actually is.
+//
+// A lane that falls behind is served an OLD id band and CANNOT tell from the
+// inside: silence, a stale premise and a current inbox all look identical to
+// the agent receiving them (qa, 2026-07-31, measured po ~150 and engineer ~250
+// ids behind while live traffic was at 14940+). It is not hypothetical. The PO
+// escalated that the engineer had gone silent while nine of the engineer's
+// replies sat undelivered, and the engineer spent a whole build implementing a
+// PO ruling that had been withdrawn before they started.
+//
+// `newerFromSender` is the actionable number, not the total: the standing rule
+// is to read everything newer FROM THAT SENDER before replying, because that is
+// where a withdrawal or a correction lives.
+export function getInboundLag(msg: { id: number; to_agent: string; from_agent: string; created_at: number }): {
+  ageSeconds: number
+  newerTotal: number
+  newerFromSender: number
+} {
+  const now = Math.floor(Date.now() / 1000)
+  const newerTotal = (db.prepare('SELECT COUNT(*) n FROM agent_messages WHERE id > ?')
+    .get(msg.id) as { n: number }).n
+  const newerFromSender = (db.prepare(
+    'SELECT COUNT(*) n FROM agent_messages WHERE id > ? AND from_agent = ? AND to_agent = ?'
+  ).get(msg.id, msg.from_agent, msg.to_agent) as { n: number }).n
+  return { ageSeconds: Math.max(0, now - msg.created_at), newerTotal, newerFromSender }
+}
+
 // The actual last-N messages for ONE agent, filtered in SQL (NOT global-last-N
 // then JS-filter -- that starved rarely-active agents' threads, dashboard bug
 // 2026-06-03). `beforeId` pages older: pass the oldest id you already have to

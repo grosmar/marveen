@@ -63,6 +63,32 @@ export function classifyAgentMessage(
 // `msgId` is the inter-agent message DB row id; when provided it is appended to
 // the prefix so the receiving agent can write back done/failed via PUT
 // /api/messages/:id without needing to parse or guess the id.
+export interface InboundLag { ageSeconds: number; newerTotal: number; newerFromSender: number }
+
+// A backlogged lane is served an OLD id band and cannot tell from the inside --
+// silence, a stale premise and a current inbox are indistinguishable to the
+// agent receiving them. So the router says it out loud, in the prefix (router
+// metadata, deliberately OUTSIDE the trusted/untrusted frame: a sender must
+// never be able to forge or suppress it).
+//
+// Deliberately quiet: nothing is emitted unless the message is genuinely old or
+// the bus has moved a long way past it, so a healthy fleet never sees this.
+// `newerFromSender` is the number that changes behaviour -- a withdrawal or a
+// correction from the same sender is exactly what a stale reader acts against.
+const STALE_AGE_SECONDS = 600
+const STALE_ID_GAP = 100
+
+export function formatInboundLag(lag: InboundLag | null | undefined): string {
+  if (!lag) return ''
+  if (lag.ageSeconds < STALE_AGE_SECONDS && lag.newerTotal < STALE_ID_GAP) return ''
+  const mins = Math.round(lag.ageSeconds / 60)
+  const age = mins >= 120 ? `${Math.round(mins / 60)}h` : `${mins}m`
+  const fromSender = lag.newerFromSender > 0
+    ? ` ${lag.newerFromSender} newer message(s) from THIS SENDER are queued behind it -- read those before acting, a withdrawal or correction lives there.`
+    : ' No newer message from this sender, but your view of the fleet is behind.'
+  return ` | STALE-INBOX: written ${age} ago, ${lag.newerTotal} bus rows newer than it exist.${fromSender}`
+}
+
 export function wrapAgentMessageForDelivery(
   category: AgentMessageCategory,
   safeFrom: string,
@@ -70,12 +96,19 @@ export function wrapAgentMessageForDelivery(
   content: string,
   msgId?: number,
   originNote?: string | null,
+  lag?: InboundLag | null,
 ): { prefix: string; wrapped: string } {
+  const lagSuffix = formatInboundLag(lag)
   if (category === 'channel-inbound') {
     // The <channel> block IS the message, framed like the native plugin inbound.
-    return { wrapped: wrapChannelInbound(content), prefix: `${CHANNEL_INBOUND_PREAMBLE}\n` }
+    // A stale channel message matters MORE than a stale peer message: zubi is
+    // waiting on a reply to something he may have already followed up on.
+    return {
+      wrapped: wrapChannelInbound(content),
+      prefix: `${CHANNEL_INBOUND_PREAMBLE}${lagSuffix ? `\n[${lagSuffix.replace(/^ \| /, '')}]` : ''}\n`,
+    }
   }
-  const idSuffix = msgId != null ? `, msg_id:${msgId}` : ''
+  const idSuffix = (msgId != null ? `, msg_id:${msgId}` : '') + lagSuffix
   // Card 06f062e4: surface the self-declared origin_note (if the sender set
   // one) so a recipient reading multiple messages from the same from_agent
   // has a chance to tell apart which sub-session sent which -- purely a

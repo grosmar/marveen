@@ -96,6 +96,17 @@ describe('GET /api/messages query contract', () => {
     expect(out.headers['x-result-order']).toBe('id-asc')
   })
 
+  it('a truncated since_id page keeps the OLDEST end, so nothing is skipped', async () => {
+    // analyst flagged this as the property that decides whether the cursor is
+    // safe: a forward cursor that returns the NEWEST rows after the bound would
+    // silently skip the middle of the range, and would do it worst on the
+    // deepest backlog -- the same shape as the watchdog.sh bug this replaced.
+    const start = ids[0] - 1
+    const { ctx, out } = fakeCtx(`?since_id=${start}&limit=3`)
+    await tryHandleMessages(ctx)
+    expect(out.body.map((m: any) => m.id)).toEqual(ids.slice(0, 3))
+  })
+
   it('since_id + limit is a usable cursor: two pages cover the whole range', async () => {
     const start = ids[0] - 1
     const page1 = fakeCtx(`?since_id=${start}&limit=10`)
