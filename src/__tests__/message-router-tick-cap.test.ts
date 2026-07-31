@@ -58,6 +58,11 @@ vi.mock('../web/agent-config.js', () => ({
 vi.mock('../web/agent-process.js', () => ({
   agentSessionName: (name: string) => `agent-${name}`,
   isSessionReadyForPrompt: vi.fn(() => false),
+  // The router delivers through the QUEUED-prompt gate (it does not wait for
+  // the recipient's turn to end -- see isSessionReadyForQueuedPrompt). Kept
+  // false here for the same reason as above: these cases assert slice
+  // COMPOSITION, so nothing must actually be delivered.
+  isSessionReadyForQueuedPrompt: vi.fn(() => false),
   clearStaleParkedInput: vi.fn(() => false),
   sendPromptToSession: vi.fn(),
   sessionExistsOnHost: (...a: unknown[]) => mockSessionExistsOnHost(...a),
@@ -152,7 +157,7 @@ describe('message router per-tick work cap', () => {
 
     await runMessageRouterTick()
 
-    // Session absent=false now, but isSessionReadyForPrompt is mocked false, so
+    // Session absent=false now, but isSessionReadyForQueuedPrompt is mocked false, so
     // nothing is delivered/failed -- we are asserting the slice composition via
     // the per-unique-receiver pre-pass seeing both agents exactly once each.
     const sessions = mockSessionExistsOnHost.mock.calls.map((c) => c[1])

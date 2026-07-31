@@ -15,6 +15,7 @@ import {
   stripGhostSuggestion,
   paneShowsContextSaturation,
   idleConsideringDimGhost,
+  paneAcceptsQueuedPrompt,
   detectsFirstRunGate,
   detectsModelConsentDialog,
   type FirstRunGateKind,
@@ -1944,6 +1945,36 @@ export async function isSessionReadyForPrompt(session: string, host: string | nu
     return false
   }
   return idleOrGhost(second)
+}
+
+// Readiness check for INTER-AGENT BUS delivery only (message-router). Unlike
+// isSessionReadyForPrompt it does not wait for the turn to end: Claude Code
+// queues input typed mid-turn and replays it at the turn boundary, so a busy
+// pane is a perfectly good delivery target. See paneAcceptsQueuedPrompt.
+//
+// WHAT THIS FIXES (2026-07-31): the router could only deliver into an idle
+// pane, so every agent's inbox drained at the rate its recipient finished
+// turns -- and the po hub, which takes the longest turns in the fleet, sat on
+// a 31-deep queue while the round-robin tick budget it was blamed on was
+// working perfectly. The queue was never a transport fault or a flood; it was
+// this gate. Delivery no longer depends on how long the recipient thinks.
+//
+// The genuine hazards are all still refused: context saturation, a dead or
+// undrawn TUI, a paste placeholder, and REAL parked text in the input box.
+// There is no double-capture confirm here on purpose -- that second read
+// exists to avoid racing a turn boundary, which is exactly the race this
+// predicate no longer cares about.
+export async function isSessionReadyForQueuedPrompt(session: string, host: string | null = null): Promise<boolean> {
+  const plain = capturePane(session, host)
+  if (plain == null) return false
+  if (paneShowsContextSaturation(plain)) {
+    logger.warn({ session }, 'bus: refusing delivery — session shows context saturation (100% context)')
+    return false
+  }
+  // Only pay for the dim-stripped second capture when the plain view is
+  // ambiguous, same economy as isSessionReadyForPrompt.
+  const needsDimRead = detectPaneState(plain, { ignoreBusy: true }) === 'typing'
+  return paneAcceptsQueuedPrompt(plain, needsDimRead ? captureParkedInputView(session, host) : null)
 }
 
 // How long to wait between the two parked-input captures when deciding whether

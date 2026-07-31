@@ -21,6 +21,7 @@ import { readAgentRemoteHost, readAgentVoiceConfig } from './agent-config.js'
 import {
   agentSessionName,
   isSessionReadyForPrompt,
+  isSessionReadyForQueuedPrompt,
   clearStaleParkedInput,
   sendPromptToSession,
   sessionExistsOnHost,
@@ -532,7 +533,14 @@ export async function runMessageRouterTick(): Promise<void> {
         continue
       }
 
-      if (!(await isSessionReadyForPrompt(session, host))) {
+      // Bus delivery does NOT wait for the recipient's turn to end -- Claude
+      // Code queues a mid-turn prompt and replays it at the boundary. Using
+      // the strict idle gate here made every inbox drain at the rate its
+      // OWNER finished turns, which is why the po hub's queue grew without
+      // bound while the tick budget was doing its job. See
+      // isSessionReadyForQueuedPrompt. The strict gate still guards the
+      // scheduler, the keepalive and the context guard.
+      if (!(await isSessionReadyForQueuedPrompt(session, host))) {
         // ---- session-stuck detection (card 2922e380 thread a) ----
         // Track how long this session has been continuously not-ready.
         const stuckStart = agentStuckSince.get(msg.to_agent)

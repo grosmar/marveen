@@ -517,6 +517,23 @@ export interface DetectPaneStateOptions {
    * merged into 'busy'. Default false -- callers that care about
    * "user actively composing" vs "mid-turn" can distinguish. */
   mergeTypingAsBusy?: boolean
+  /** If true, skip the busy signals (spinner / token-counter / `esc to
+   * interrupt`) and classify the pane purely on TUI health + input-box
+   * contents -- i.e. "would this pane be idle if it weren't mid-turn?".
+   *
+   * WHY THIS EXISTS (2026-07-31, zubi): Claude Code QUEUES input typed during
+   * a running turn ("Press up to edit queued messages" appears in the box and
+   * the `bypass permissions` footer keeps rendering next to `esc to
+   * interrupt`). Waiting for a turn to END before delivering was therefore
+   * never a platform limit, it was our own gate -- and it is what let the
+   * inter-agent bus pile up behind whichever agent had the longest turns.
+   *
+   * The hazards that DO justify refusing are all still checked: a missing
+   * footer (dead/undrawn TUI), a paste placeholder, a thinking-block error,
+   * context saturation, and REAL parked text in the box (appending to a
+   * half-typed line concatenates and garbles both). Only "is it busy" is
+   * dropped. Default false -- every existing caller keeps the strict gate. */
+  ignoreBusy?: boolean
 }
 
 // Busy indicators (the spinner token-counter and "esc to interrupt") render
@@ -560,17 +577,19 @@ export function detectPaneState(
   // Spinner / token-counter busy signals, scoped to the live bottom region.
   // Whole-pane scanning let a completed turn's stale token-counter line pin
   // an idle session busy (see BUSY_LIVE_REGION_LINES).
-  const busyRegion = paneLines.slice(-BUSY_LIVE_REGION_LINES).join('\n')
-  for (const rx of BUSY_INDICATORS) {
-    if (rx.test(busyRegion)) return 'busy'
-  }
+  if (!opts.ignoreBusy) {
+    const busyRegion = paneLines.slice(-BUSY_LIVE_REGION_LINES).join('\n')
+    for (const rx of BUSY_INDICATORS) {
+      if (rx.test(busyRegion)) return 'busy'
+    }
 
-  // Scope `esc to interrupt` check to the live footer region only.
-  // Checking the whole pane would let a scrollback quote of the phrase
-  // (e.g. in a watchdog report or a log analysis) permanently classify
-  // an idle session as busy.
-  const footerRegion = paneLines.slice(-LIVE_FOOTER_REGION_LINES).join('\n')
-  if (BUSY_ESC_TO_INTERRUPT_RX.test(footerRegion)) return 'busy'
+    // Scope `esc to interrupt` check to the live footer region only.
+    // Checking the whole pane would let a scrollback quote of the phrase
+    // (e.g. in a watchdog report or a log analysis) permanently classify
+    // an idle session as busy.
+    const footerRegion = paneLines.slice(-LIVE_FOOTER_REGION_LINES).join('\n')
+    if (BUSY_ESC_TO_INTERRUPT_RX.test(footerRegion)) return 'busy'
+  }
 
   // Pending-paste placeholder check runs BEFORE the idle-footer gate. The
   // stub sits in the live input box; the footer below it is version-dependent
@@ -664,6 +683,32 @@ export function idleConsideringDimGhost(plain: string, dimStripped: string | nul
   if (paneLooksIdle(plain)) return true
   if (detectPaneState(plain) !== 'typing') return false
   return dimStripped != null && paneLooksIdle(dimStripped)
+}
+
+/**
+ * True when the pane will ACCEPT a prompt right now, whether or not it is
+ * mid-turn. Claude Code queues input typed during a running turn and replays
+ * it when the turn ends, so a busy pane is a valid delivery target -- see the
+ * `ignoreBusy` note on DetectPaneStateOptions for why this is not the same
+ * question as "is the agent free".
+ *
+ * Used ONLY by the inter-agent message router. The scheduler, the keepalive
+ * and the context guard keep the strict idle gate: they inject work that a
+ * busy agent should not have piled on top of it, whereas a bus message is
+ * correspondence that should land in the agent's queue as soon as it is sent.
+ *
+ * Dim-ghost handling is the same two-step as idleConsideringDimGhost, and it
+ * matters MORE here: a busy pane renders "Press up to edit queued messages" in
+ * the input box, which is dim placeholder chrome but matches PARKED_INPUT_RX
+ * in a plain capture. Without the dim-stripped second read, a pane with queued
+ * messages would look like a pane with half-typed user text and we would
+ * refuse exactly the sessions we most need to reach.
+ */
+export function paneAcceptsQueuedPrompt(plain: string, dimStripped: string | null): boolean {
+  const st = detectPaneState(plain, { ignoreBusy: true })
+  if (st === 'idle') return true
+  if (st !== 'typing') return false
+  return dimStripped != null && detectPaneState(dimStripped, { ignoreBusy: true }) === 'idle'
 }
 
 // Locate the live Claude Code input box and return its inner content as
