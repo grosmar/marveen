@@ -648,7 +648,21 @@ export async function runMessageRouterTick(): Promise<void> {
         const { prefix, wrapped } = wrapAgentMessageForDelivery(category, safeFromAgent, msg.from_agent, content, msg.id, msg.origin_note)
         // Inline preamble so a fresh session (post hard-restart) doesn't miss
         // the context that explains the tag semantics.
-        await sendPromptToSession(session, prefix + wrapped, host)
+        //
+        // waitForIdle:false -- the SECOND idle gate on this path, and for the
+        // router it was pure latency. onBusyTimeout defaults to 'send', so a
+        // busy pane burned the full 12s budget and then sent anyway: the wait
+        // never once prevented a delivery, it only serialized the fleet at
+        // ~1 message per 15s (measured 4/75s across five queues, 2026-07-31).
+        // Every guard it appeared to provide is still in place and runs
+        // closer to the send: the modal dismissals happen before the wait,
+        // shouldClearTruncatedPreamble only matches a half-landed preamble
+        // marker (which a mid-turn pane does not render), and the router's own
+        // isSessionReadyForQueuedPrompt admission gate refused the real
+        // hazards -- modal, parked text, context saturation, dead TUI --
+        // moments earlier. Same reasoning the forceSend scheduled-task path
+        // already opts out on: inject regardless, let Claude Code queue it.
+        await sendPromptToSession(session, prefix + wrapped, host, { waitForIdle: false })
         if (!markMessageDelivered(msg.id)) {
           logger.warn({ id: msg.id }, 'markMessageDelivered affected 0 rows (deleted concurrently?)')
         }
