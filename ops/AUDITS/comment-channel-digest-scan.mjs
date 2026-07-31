@@ -71,6 +71,30 @@ console.log(`        + ${ideaComments} idea_comments rows`)
 // CHECKABLE rather than assumed: the table is AUTOINCREMENT, so a delete leaves an id gap.
 console.log(`DELETION CHECK: id gaps = ${gaps.length ? gaps.join(',') : 'NONE, so no comment has ever been deleted from this table'}`)
 
+// ---- 1b. IS 57 THE CORPUS, OR IS IT WHAT MY FETCH RETURNED? (content, msg 15852) --------------
+// "The injected control certifies the READER. Nothing certifies the CORPUS." Correct, and it was
+// missing. An injected positive proves the matcher fires on text handed to it; it is silent on
+// whether the text handed to it is all the text. Two ways this fetch could return a subset and
+// look clean, both real on this host:
+//   [i]  A CAP. The bus API defaults to 50 rows and sets X-Result-Truncated, which is how the
+//        morning kickoff was reading 19% of a day (QA, card 6910a684). This scan reads sqlite
+//        DIRECTLY with no LIMIT clause, so that class does not apply -- stated because "it does not
+//        apply here" is a claim, not an absence.
+//   [ii] A STALE SNAPSHOT. store/claudeclaw.db is journal_mode=WAL with a ~5MB -wal, and this
+//        connection is readonly. A reader that cannot see the WAL reads the last checkpoint and
+//        reports a smaller, older, entirely well-formed corpus. THAT is the lane where a
+//        comfortable answer is indistinguishable from a true one.
+// So: a second reader, opened with different flags, counted independently. Mismatch aborts.
+const verify = new Database(DB).prepare('SELECT COUNT(*) c, MAX(id) m FROM kanban_comments').get()
+const walOK = verify.c === rows.length && verify.m === maxId
+console.log(`CORPUS RECONCILE (second reader, read-write flags, WAL-visible): ${verify.c} rows, max id ${verify.m}`)
+if (!walOK) {
+  console.error(`ABORT: the two readers disagree (${rows.length}/${maxId} vs ${verify.c}/${verify.m}).`)
+  console.error('Do NOT report a zero from a corpus two readers cannot agree on.')
+  process.exit(2)
+}
+console.log('  -> agreed. The corpus is the table, not a snapshot of it.')
+
 // ---- 2. classify every hex token: card id, idea id, git sha, or unexplained --------------------
 const cards = new Set(db.prepare('SELECT id FROM kanban_cards').all().map((r) => String(r.id)))
 const ideas = new Set(db.prepare('SELECT id FROM idea_box').all().map((r) => String(r.id)))
@@ -227,7 +251,14 @@ console.log(`  and ${unexplained.length} to neither -- both 8-digit DECIMAL, han
 console.log(`  64-hex tokens (a full sha256) anywhere in the corpus: ${rows.filter((r) => /\b[0-9a-fA-F]{64}\b/.test(r.content)).length}.`)
 console.log(`  Opaque non-hex tokens of digest length (22-88 chars): ${allOpaque.size}, all hand-classified,`)
 console.log('  residual 0. The zero now covers 7 of 7 encodings, not the 5 the first version covered.')
-console.log('  NO DIGEST EXCHANGE ON THE COMMENT CHANNEL.')
+// THE HEADLINE CARRIES ITS OWN SCOPE (content, msg 15852). "No digest exchange" is the sentence
+// that gets lifted into a card, and quotation is lossy in exactly one direction: it keeps the claim
+// and drops the qualifier. The more carefully the qualifier is filed in its own section, the more
+// reliably it is left behind. So the bound rides in the sentence, at the cost of it being uglier.
+console.log(`
+  NO DIGEST EXCHANGE ACROSS ALL ${rows.length} KANBAN COMMENTS, READ IN FULL, IN ANY OF 7 ENCODINGS
+  INCLUDING NON-HEX -- SCOPED TO THE COMMENT CHANNEL AS IT READS TODAY, WHICH EXCLUDES CARD
+  DESCRIPTION BODIES, PRE-EDIT TEXT, AND EVERY OTHER CHANNEL.`)
 
 // ---- 7. EXCLUSIONS, WRITTEN OUT LONGHAND -----------------------------------------------------
 // Not the controls. The controls are what I already thought of; these are what the zero does NOT
