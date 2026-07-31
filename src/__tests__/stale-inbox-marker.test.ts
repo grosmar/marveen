@@ -15,16 +15,40 @@
 // behaviour (newer messages from the SAME sender, where a withdrawal lives).
 import { describe, it, expect, beforeAll } from 'vitest'
 import { formatInboundLag, wrapAgentMessageForDelivery } from '../web/agent-message-wrap.js'
-import { initDatabase, createAgentMessage, getInboundLag } from '../db.js'
+import {
+  initDatabase, createAgentMessage, getInboundLag, getAgentMessage, markMessageDelivered, getDb,
+} from '../db.js'
 
 beforeAll(() => { initDatabase(':memory:') })
 
 describe('stale-inbox marker', () => {
   it('is silent on a healthy fleet: fresh message, quiet bus', () => {
     expect(formatInboundLag({ ageSeconds: 12, newerTotal: 3, newerFromSender: 0 })).toBe('')
-    expect(formatInboundLag({ ageSeconds: 599, newerTotal: 99, newerFromSender: 4 })).toBe('')
+    expect(formatInboundLag({ ageSeconds: 599, newerTotal: 99, newerFromSender: 2 })).toBe('')
     expect(formatInboundLag(null)).toBe('')
     expect(formatInboundLag(undefined)).toBe('')
+  })
+
+  it('fires on sender fan-out alone: fresh message, quiet bus, sender piled up', () => {
+    // The defect qa found on 2026-07-31: newerFromSender was rendered but never
+    // gated on, so the field the design calls load-bearing could not arm the
+    // marker at any magnitude. This case is the discriminator -- against the old
+    // two-clause gate every assertion below fails, because it returned ''.
+    const s = formatInboundLag({ ageSeconds: 30, newerTotal: 8, newerFromSender: 3 })
+    expect(s).toMatch(/STALE-INBOX/)
+    expect(s).toMatch(/3 newer message\(s\) from THIS SENDER/)
+    // ...and it holds the line one below the threshold, so the fix is a
+    // threshold and not "fire whenever the sender sent twice".
+    expect(formatInboundLag({ ageSeconds: 30, newerTotal: 8, newerFromSender: 2 })).toBe('')
+  })
+
+  it('claims only what it measured: age alone does not assert a fleet-wide backlog', () => {
+    // The old text went on to say "but your view of the fleet is behind" in the
+    // no-fan-out branch. On a 2h-old message over a bus that moved two rows,
+    // that sentence is false: the sender was slow, the receiver is current.
+    const s = formatInboundLag({ ageSeconds: 7200, newerTotal: 2, newerFromSender: 0 })
+    expect(s).toMatch(/No newer message from this sender\./)
+    expect(s).not.toMatch(/your view of the fleet is behind/)
   })
 
   it('fires on age alone, even when the bus is quiet', () => {
@@ -100,5 +124,35 @@ describe('stale-inbox marker', () => {
     // Only the same sender->recipient pair: not the qa row, not the other-recipient row.
     expect(lag.newerFromSender).toBe(2)
     expect(lag.ageSeconds).toBeLessThan(5)
+  })
+
+  // Every case above this line hand-builds the lag object, so the suite could
+  // stay green while the DB->render path was broken end to end. These two run a
+  // REAL row through getInboundLag into formatInboundLag and assert on the
+  // rendered string, and they are a matched pair: same shape, one field moved.
+  // AGE must come from created_at (how long the message has been true) and never
+  // from delivered_at (how long the transport took) -- a re-delivery of a fresh
+  // row must not be dressed up as a stale premise.
+  it('end to end: a row backdated in created_at speaks', () => {
+    const id = createAgentMessage('zz-e2e-po', 'zz-e2e-eng', 'the ruling').id
+    getDb().prepare('UPDATE agent_messages SET created_at = ? WHERE id = ?')
+      .run(Math.floor(Date.now() / 1000) - 7200, id)
+    const row = getAgentMessage(id)!
+    expect(row.delivered_at).toBeFalsy()
+
+    const s = formatInboundLag(getInboundLag(row))
+    expect(s).toMatch(/STALE-INBOX/)
+    expect(s).toMatch(/2h ago/)
+  })
+
+  it('end to end: the same row fresh, with delivered_at backdated instead, stays silent', () => {
+    const id = createAgentMessage('zz-e2e2-po', 'zz-e2e2-eng', 'the ruling').id
+    markMessageDelivered(id)
+    getDb().prepare('UPDATE agent_messages SET delivered_at = ? WHERE id = ?')
+      .run(Math.floor(Date.now() / 1000) - 7200, id)
+    const row = getAgentMessage(id)!
+    expect(row.delivered_at).toBeTruthy()
+
+    expect(formatInboundLag(getInboundLag(row))).toBe('')
   })
 })

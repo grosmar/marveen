@@ -71,21 +71,43 @@ export interface InboundLag { ageSeconds: number; newerTotal: number; newerFromS
 // metadata, deliberately OUTSIDE the trusted/untrusted frame: a sender must
 // never be able to forge or suppress it).
 //
-// Deliberately quiet: nothing is emitted unless the message is genuinely old or
-// the bus has moved a long way past it, so a healthy fleet never sees this.
-// `newerFromSender` is the number that changes behaviour -- a withdrawal or a
-// correction from the same sender is exactly what a stale reader acts against.
+// Deliberately quiet: nothing is emitted unless the message is genuinely old,
+// the bus has moved a long way past it, or the SENDER has piled up behind it --
+// so a healthy fleet never sees this.
+//
+// `newerFromSender` is the number that changes behaviour (a withdrawal or a
+// correction from the same sender is exactly what a stale reader acts against),
+// and until 2026-07-31 it was a passenger: the gate read only age and total, so
+// the field the design calls load-bearing could not arm the marker at ANY
+// magnitude. qa found it by sweeping 1, 4, 9, 50, 999, 100000 against a quiet
+// bus and getting silence at every one. It now has its own trigger.
+//
+// The fan-out threshold is 3, measured over the 14,824 timed deliveries in the
+// bus at the time: arming at >=1 adds 1,507 fires to the 3,021 that already
+// exist (30.5% of all deliveries carrying a marker, which destroys the "silent
+// on a healthy fleet" property above), >=2 adds 457, >=3 adds 142 (~1%). Three
+// still catches the real shape -- msg 1197 engineer->po, 232s old with 6 newer
+// from the same sender, was delivered silent.
 const STALE_AGE_SECONDS = 600
 const STALE_ID_GAP = 100
+const STALE_SENDER_FANOUT = 3
 
 export function formatInboundLag(lag: InboundLag | null | undefined): string {
   if (!lag) return ''
-  if (lag.ageSeconds < STALE_AGE_SECONDS && lag.newerTotal < STALE_ID_GAP) return ''
+  if (
+    lag.ageSeconds < STALE_AGE_SECONDS &&
+    lag.newerTotal < STALE_ID_GAP &&
+    lag.newerFromSender < STALE_SENDER_FANOUT
+  ) return ''
   const mins = Math.round(lag.ageSeconds / 60)
   const age = mins >= 120 ? `${Math.round(mins / 60)}h` : `${mins}m`
+  // Report only what was measured. The old else-branch went on to assert "but
+  // your view of the fleet is behind", which the numbers do not support when
+  // age alone tripped the gate: a 2h-old message on a bus that moved two rows
+  // means the SENDER was slow, not that the receiver is behind anything.
   const fromSender = lag.newerFromSender > 0
     ? ` ${lag.newerFromSender} newer message(s) from THIS SENDER are queued behind it -- read those before acting, a withdrawal or correction lives there.`
-    : ' No newer message from this sender, but your view of the fleet is behind.'
+    : ' No newer message from this sender.'
   return ` | STALE-INBOX: written ${age} ago, ${lag.newerTotal} bus rows newer than it exist.${fromSender}`
 }
 
