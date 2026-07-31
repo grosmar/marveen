@@ -11,12 +11,21 @@ set -e
 # kimenetet bemasoljak egy issue-ba vagy screen share-be. A trace megmarad, csak nem
 # a beillesztheto kimenetbe megy, hanem egy 600-as fajlba. Egy pont, minden regiora.
 if [ "${DEBUG:-0}" = "1" ]; then
-  _XTRACE_LOG="${TMPDIR:-/tmp}/marveen-install-trace.$$.log"
-  ( umask 077 && : >"$_XTRACE_LOG" )
+  # mktemp, nem "$$": a kiszamithato nev egy world-writable sticky konyvtarban elore
+  # elhelyezheto (symlink vagy regular pre-plant), a ">" pedig koveti a symlinket. Ezen a
+  # gepen a fs.protected_symlinks=1 / protected_regular=2 kernel-beallitas megfogja, DE ez
+  # a script mas gepekre telepul, ahol nem a mi sysctl-unk vedi. A mktemp definicio szerint
+  # 600-as es utkozesmentes, es ez a repo bevett idiomaja (:1339 is igy csinalja).
+  _XTRACE_LOG=$(mktemp "${TMPDIR:-/tmp}/marveen-install-trace.XXXXXX.log")
   exec 9>>"$_XTRACE_LOG"
   BASH_XTRACEFD=9   # SOHA ne exportald: a gyerekfolyamatoknak nincs 9-es fd-je
+  # Sikeres futasnal toroljuk, hibasnal marad - a trace pont akkor kell, amikor elszallt.
+  # Enelkul minden sikeres DEBUG-telepites hagy egy korlatlan ideig elo credential-fajlt:
+  # a "pasteable outputbol on-disk fajlba" csere csak akkor jo csere, ha a fajlnak vege van.
+  # Az EXIT trap megorzi az eredeti kilepesi kodot (merve: rc=0 -> torol, rc=3 -> megtart).
+  trap '[ $? -eq 0 ] && rm -f "$_XTRACE_LOG"' EXIT
   set -x
-  printf '%s\n' "  ! DEBUG trace -> $_XTRACE_LOG (credentialt tartalmaz, ne oszd meg)" >&2
+  printf '%s\n' "  ! DEBUG trace -> $_XTRACE_LOG (credentialt tartalmaz, ne oszd meg; sikeres telepitesnel torlodik)" >&2
 fi
 
 # Ha a terminal tipusa ismeretlen (pl. xterm-ghostty), visszaesunk xterm-256color-ra
