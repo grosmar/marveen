@@ -71,7 +71,10 @@ ensure_in_rc() {
     [ -f "$rc" ] || continue
     grep -qF "$marker" "$rc" 2>/dev/null && continue
     printf '%s\n' "$line" >>"$rc"
-    warn "RC updated ($(basename "$rc")): $line"
+    # Csak a markert irjuk ki, SOHA a sort: ket hivo ($line-ban) nyers
+    # credentialt ad at (ANTHROPIC_API_KEY :473, CLAUDE_CODE_OAUTH_TOKEN :491),
+    # es az echo bekerulne a terminalba es minden mentett install-logba.
+    warn "RC updated ($(basename "$rc")): $marker set"
   done
 }
 
@@ -467,7 +470,10 @@ else
   if [ "$AUTH_MODE" = "1" ]; then
     echo ""
     echo -e "  ${DIM}API kulcsot itt talalod: https://console.anthropic.com/settings/keys${NC}"
-    read -p "  ANTHROPIC_API_KEY (sk-ant-...): " ANTHROPIC_API_KEY_INPUT
+    # -s: a kulcs ne jelenjen meg gepeles/paste kozben (terminal scrollback).
+    # -r: backslash ne toressen el egy tokent.
+    read -rsp "  ANTHROPIC_API_KEY (sk-ant-...): " ANTHROPIC_API_KEY_INPUT
+    echo ""
     if [ -n "$ANTHROPIC_API_KEY_INPUT" ]; then
       export ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_INPUT"
       ensure_in_rc 'ANTHROPIC_API_KEY' "export ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY_INPUT\""
@@ -485,7 +491,9 @@ else
     echo -e "  ${BOLD}3.${NC} A bongeszo megnyilik, jelentkezz be a Claude fiokoddal"
     echo -e "  ${BOLD}4.${NC} Paste the printed token back here:"
     echo ""
-    read -p "  OAuth token: " OAUTH_TOKEN_INPUT
+    # -s / -r: mint fent, a token ne keruljon a scrollbackbe.
+    read -rsp "  OAuth token: " OAUTH_TOKEN_INPUT
+    echo ""
     if [ -n "$OAUTH_TOKEN_INPUT" ]; then
       export CLAUDE_CODE_OAUTH_TOKEN="$OAUTH_TOKEN_INPUT"
       ensure_in_rc 'CLAUDE_CODE_OAUTH_TOKEN' "export CLAUDE_CODE_OAUTH_TOKEN=\"$OAUTH_TOKEN_INPUT\""
@@ -656,7 +664,9 @@ if [ "$CHANNEL_PROVIDER" = "telegram" ]; then
   echo -e "${DIM}  3. Adj nevet a botodnak${NC}"
   echo -e "${DIM}  4. Paste the token you receive here:${NC}"
   echo ""
-  read -rp "$(_t prompt_telegram_token)" BOT_TOKEN
+  # -s: hosszu eletu bot-credential, ne keruljon a scrollbackbe.
+  read -rsp "$(_t prompt_telegram_token)" BOT_TOKEN
+  echo ""
 elif [ "$CHANNEL_PROVIDER" = "discord" ]; then
   echo ""
   echo -e "${DIM}  Az AI asszisztensed Discordon kommunikal veled.${NC}"
@@ -667,7 +677,9 @@ elif [ "$CHANNEL_PROVIDER" = "discord" ]; then
   echo -e "${DIM}  5. Copy the channel ID (Developer Mode > right-click > Copy Channel ID)${NC}"
   echo -e "${DIM}  6. Sajat (operator) user ID: jobb klikk a nevedre > Copy User ID${NC}"
   echo ""
-  read -rp "$(_t prompt_discord_bot_token)" DISCORD_BOT_TOKEN
+  # -s: hosszu eletu bot-credential, ne keruljon a scrollbackbe.
+  read -rsp "$(_t prompt_discord_bot_token)" DISCORD_BOT_TOKEN
+  echo ""
   read -rp "$(_t prompt_discord_channel_id)" DISCORD_CHANNEL_ID
   echo ""
   echo -e "${DIM}  The operator user ID is needed for pairing: when a new user${NC}"
@@ -686,8 +698,12 @@ else
   echo -e "${DIM}     app_mention, message.channels, message.groups, message.im${NC}"
   echo -e "${DIM}  5. Installald a workspace-be${NC}"
   echo ""
-  read -rp "$(_t prompt_slack_bot_token)" SLACK_BOT_TOKEN
-  read -rp "$(_t prompt_slack_app_token)" SLACK_APP_TOKEN
+  # -s: hosszu eletu bot-credential, ne keruljon a scrollbackbe.
+  read -rsp "$(_t prompt_slack_bot_token)" SLACK_BOT_TOKEN
+  echo ""
+  # -s: hosszu eletu bot-credential, ne keruljon a scrollbackbe.
+  read -rsp "$(_t prompt_slack_app_token)" SLACK_APP_TOKEN
+  echo ""
 fi
 
 read -rp "$(_t prompt_bot_name)" BOT_NAME

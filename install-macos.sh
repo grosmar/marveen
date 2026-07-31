@@ -297,7 +297,9 @@ if [ "$CHANNEL_PROVIDER" = "telegram" ]; then
   echo -e "${DIM}  3. Adj nevet a botodnak${NC}"
   echo -e "${DIM}  4. Masold ide a kapott tokent:${NC}"
   echo ""
-  read -rp "$(_t prompt_telegram_token)" BOT_TOKEN
+  # -s: hosszu eletu bot-credential, ne keruljon a scrollbackbe.
+  read -rsp "$(_t prompt_telegram_token)" BOT_TOKEN
+  echo ""
 else
   echo ""
   echo -e "${DIM}  Az AI asszisztensed Slack-en kommunikal veled.${NC}"
@@ -311,8 +313,12 @@ else
   echo -e "${DIM}     app_mention, message.channels, message.groups, message.im${NC}"
   echo -e "${DIM}  5. Installald a workspace-be${NC}"
   echo ""
-  read -rp "$(_t prompt_slack_bot_token)" SLACK_BOT_TOKEN
-  read -rp "$(_t prompt_slack_app_token)" SLACK_APP_TOKEN
+  # -s: hosszu eletu bot-credential, ne keruljon a scrollbackbe.
+  read -rsp "$(_t prompt_slack_bot_token)" SLACK_BOT_TOKEN
+  echo ""
+  # -s: hosszu eletu bot-credential, ne keruljon a scrollbackbe.
+  read -rsp "$(_t prompt_slack_app_token)" SLACK_APP_TOKEN
+  echo ""
 
   # Managed settings: Claude Code requires allowedChannelPlugins at system level
   MANAGED_DIR="/Library/Application Support/ClaudeCode"
